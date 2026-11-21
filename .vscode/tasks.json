@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "TTS: Watch & auto-pull",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/tts_sync.py", "watch"],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "group": "tts-sync"
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "TTS: Status (diff repo vs save)",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/tts_sync.py", "status"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tts-sync"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "TTS: Pull now",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/tts_sync.py", "pull"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tts-sync"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "TTS: Push repo scripts into save (overwrites save, keeps .bak)",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/tts_sync.py", "push"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tts-sync"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

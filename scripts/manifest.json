@@ -1,0 +1,390 @@
+{
+  "save_source": "C:\\Users\\brndn\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_1.json",
+  "last_sync": "2026-11-21T20:33:20.770805+00:00",
+  "objects": {
+    "5a7db4": {
+      "file": "scripts/objects/Bruh Button_5a7db4.lua",
+      "nickname": "Bruh Button"
+    },
+    "5cb175": {
+      "file": "scripts/objects/Highlight Mat_5cb175.lua",
+      "nickname": "Highlight Mat"
+    },
+    "40b95f": {
+      "file": "scripts/objects/Highlight Mat_40b95f.lua",
+      "nickname": "Highlight Mat"
+    },
+    "a42baa": {
+      "file": "scripts/objects/Highlight Mat_a42baa.lua",
+      "nickname": "Highlight Mat"
+    },
+    "8f8d5d": {
+      "file": "scripts/objects/Die_20_8f8d5d.lua",
+      "nickname": "Die_20"
+    },
+    "b607cb": {
+      "file": "scripts/objects/Die_12_b607cb.lua",
+      "nickname": "Die_12"
+    },
+    "b3e98f": {
+      "file": "scripts/objects/Die_10_b3e98f.lua",
+      "nickname": "Die_10"
+    },
+    "aa9563": {
+      "file": "scripts/objects/Die_8_aa9563.lua",
+      "nickname": "Die_8"
+    },
+    "c59653": {
+      "file": "scripts/objects/Die_6_c59653.lua",
+      "nickname": "Die_6"
+    },
+    "2477ad": {
+      "file": "scripts/objects/Krark_s Coin Flipper_2477ad.lua",
+      "nickname": "Krark's Coin Flipper"
+    },
+    "227d07": {
+      "file": "scripts/objects/Quarter_227d07.lua",
+      "nickname": "Quarter"
+    },
+    "d1ae7b": {
+      "file": "scripts/objects/Highlight Mat_d1ae7b.lua",
+      "nickname": "Highlight Mat"
+    },
+    "0beb07": {
+      "file": "scripts/objects/Counter_0beb07.lua",
+      "nickname": "Counter"
+    },
+    "e76686": {
+      "file": "scripts/objects/Text _ Counter_e76686.lua",
+      "nickname": "Text + Counter"
+    },
+    "56a44e": {
+      "file": "scripts/objects/Notecard_56a44e.lua",
+      "nickname": "Notecard"
+    },
+    "808d36": {
+      "file": "scripts/objects/Text_808d36.lua",
+      "nickname": "Text"
+    },
+    "1b86d3": {
+      "file": "scripts/objects/Notecard_1b86d3.lua",
+      "nickname": "Notecard"
+    },
+    "7c9dfd": {
+      "file": "scripts/objects/_1__1_7c9dfd.lua",
+      "nickname": "+1/+1"
+    },
+    "c9128a": {
+      "file": "scripts/objects/Counter_c9128a.lua",
+      "nickname": "Counter"
+    },
+    "c369d7": {
+      "file": "scripts/objects/πMenu_c369d7.lua",
+      "nickname": "πMenu"
+    },
+    "7a0067": {
+      "file": "scripts/objects/πNotepad_7a0067.lua",
+      "nickname": "πNotepad"
+    },
+    "de4346": {
+      "file": "scripts/objects/πScry_de4346.lua",
+      "nickname": "πScry"
+    },
+    "540e21": {
+      "file": "scripts/objects/Pirate Cannon_540e21.lua",
+      "nickname": "Pirate Cannon"
+    },
+    "1fc1e0": {
+      "file": "scripts/objects/Rhystic Block 1_1fc1e0.lua",
+      "nickname": "Rhystic Block 1"
+    },
+    "def0af": {
+      "file": "scripts/objects/πCounter_def0af.lua",
+      "nickname": "πCounter"
+    },
+    "cd83de": {
+      "file": "scripts/objects/Auto Player Promoter_cd83de.lua",
+      "nickname": "Auto Player Promoter"
+    },
+    "7071ce": {
+      "file": "scripts/objects/_b_Drop-On-Card Counter__b__7071ce.lua",
+      "nickname": "[b]Drop-On-Card Counter[/b]"
+    },
+    "4f684b": {
+      "file": "scripts/objects/_b_Drop-On-Card Counter__b__4f684b.lua",
+      "nickname": "[b]Drop-On-Card Counter[/b]"
+    },
+    "e0d9cc": {
+      "file": "scripts/objects/Counter_e0d9cc.lua",
+      "nickname": "Counter"
+    },
+    "e2c813": {
+      "file": "scripts/objects/Text _ Counter_e2c813.lua",
+      "nickname": "Text + Counter"
+    },
+    "d9bd81": {
+      "file": "scripts/objects/Notecard_d9bd81.lua",
+      "nickname": "Notecard"
+    },
+    "ad6bf5": {
+      "file": "scripts/objects/_1__1_ad6bf5.lua",
+      "nickname": "+1/+1"
+    },
+    "f62d00": {
+      "file": "scripts/objects/_b_Drop-On-Card Counter__b__f62d00.lua",
+      "nickname": "[b]Drop-On-Card Counter[/b]"
+    },
+    "c1ae57": {
+      "file": "scripts/objects/_b_Drop-On-Card Counter__b__c1ae57.lua",
+      "nickname": "[b]Drop-On-Card Counter[/b]"
+    },
+    "b93b40": {
+      "file": "EasyModule.lua",
+      "nickname": "[FFCC00]TyrantNomad's[-]\r\nEasy Modules Unified"
+    },
+    "2f714c": {
+      "file": "scripts/objects/Hand Counter_2f714c.lua",
+      "nickname": "Hand Counter"
+    },
+    "25f80a": {
+      "file": "scripts/objects/Hand Counter_25f80a.lua",
+      "nickname": "Hand Counter"
+    },
+    "5b0cc8": {
+      "file": "scripts/objects/Hand Counter_5b0cc8.lua",
+      "nickname": "Hand Counter"
+    },
+    "b40ce7": {
+      "file": "scripts/objects/Hand Counter_b40ce7.lua",
+      "nickname": "Hand Counter"
+    },
+    "9d9dda": {
+      "file": "scripts/objects/Hand Counter _Self__9d9dda.lua",
+      "nickname": "Hand Counter (Self)"
+    },
+    "0af44c": {
+      "file": "scripts/objects/Hand Counter _Self__0af44c.lua",
+      "nickname": "Hand Counter (Self)"
+    },
+    "9243e9": {
+      "file": "scripts/objects/Hand Counter _Self__9243e9.lua",
+      "nickname": "Hand Counter (Self)"
+    },
+    "d29299": {
+      "file": "scripts/objects/Hand Counter _Self__d29299.lua",
+      "nickname": "Hand Counter (Self)"
+    },
+    "809133": {
+      "file": "scripts/objects/Timer_809133.lua",
+      "nickname": "Timer"
+    },
+    "29f427": {
+      "file": "scripts/objects/Timer_29f427.lua",
+      "nickname": "Timer"
+    },
+    "57b8f3": {
+      "file": "scripts/objects/Timer_57b8f3.lua",
+      "nickname": "Timer"
+    },
+    "9df6a3": {
+      "file": "scripts/objects/Timer_9df6a3.lua",
+      "nickname": "Timer"
+    },
+    "e40450": {
+      "file": "scripts/objects/Table Instructions_e40450.lua",
+      "nickname": "Table Instructions"
+    },
+    "b8b8df": {
+      "file": "scripts/objects/Color Module_b8b8df.lua",
+      "nickname": "Color Module"
+    },
+    "fb6538": {
+      "file": "scripts/objects/hold alt_fb6538.lua",
+      "nickname": "hold alt"
+    },
+    "7cf430": {
+      "file": "scripts/objects/Custom_Tile_7cf430.lua",
+      "nickname": "Custom_Tile"
+    },
+    "997547": {
+      "file": "scripts/objects/CardCustom_997547.lua",
+      "nickname": "CardCustom"
+    },
+    "30f3c2": {
+      "file": "scripts/objects/Tickets_30f3c2.lua",
+      "nickname": "Tickets"
+    },
+    "512015": {
+      "file": "scripts/objects/Tovoloar Trigger_512015.lua",
+      "nickname": "Tovoloar Trigger"
+    },
+    "9106c4": {
+      "file": "scripts/objects/Tutor_9106c4.lua",
+      "nickname": "Tutor"
+    },
+    "5912cf": {
+      "file": "scripts/objects/get deck data_5912cf.lua",
+      "nickname": "get deck data"
+    },
+    "fd2638": {
+      "file": "scripts/objects/Jodah Enabler_fd2638.lua",
+      "nickname": "Jodah Enabler"
+    },
+    "a0464f": {
+      "file": "scripts/objects/Indomitable Creativity Enabler_a0464f.lua",
+      "nickname": "Indomitable Creativity Enabler"
+    },
+    "5e98cd": {
+      "file": "scripts/objects/Atla Palani Enabler_5e98cd.lua",
+      "nickname": "Atla Palani Enabler"
+    },
+    "1ba507": {
+      "file": "scripts/objects/Chaos Wand Enabler_1ba507.lua",
+      "nickname": "Chaos Wand Enabler"
+    },
+    "c012f6": {
+      "file": "scripts/objects/Cascade Enabler_c012f6.lua",
+      "nickname": "Cascade Enabler"
+    },
+    "e1af73": {
+      "file": "scripts/objects/Planar Bridge Enabler_e1af73.lua",
+      "nickname": "Planar Bridge Enabler"
+    },
+    "01298d": {
+      "file": "scripts/objects/Bag of Tricks_01298d.lua",
+      "nickname": "Bag of Tricks"
+    },
+    "01805a": {
+      "file": "scripts/objects/get non-basic land_01805a.lua",
+      "nickname": "get non-basic land"
+    },
+    "cdd2cc": {
+      "file": "scripts/objects/get basic land_cdd2cc.lua",
+      "nickname": "get basic land"
+    },
+    "65f205": {
+      "file": "scripts/objects/Possibility Storm___sub__i_enables context menu option on ca_65f205.lua",
+      "nickname": "Possibility Storm\r\n[sub][i]enables context menu option on cards at the table[/i][/sub]"
+    },
+    "d468e2": {
+      "file": "scripts/objects/Scrambleverse_d468e2.lua",
+      "nickname": "Scrambleverse"
+    },
+    "cbec15": {
+      "file": "scripts/objects/Mindmoil Enabler_cbec15.lua",
+      "nickname": "Mindmoil Enabler"
+    },
+    "b5797b": {
+      "file": "scripts/objects/_i_River Sol Enabler__i__b5797b.lua",
+      "nickname": "[i]River Sol Enabler[/i]"
+    },
+    "ca0e60": {
+      "file": "scripts/objects/Mass Face Down Tool_ca0e60.lua",
+      "nickname": "Mass Face Down Tool"
+    },
+    "f1ee95": {
+      "file": "scripts/objects/Manifest_Cloak Enabler_f1ee95.lua",
+      "nickname": "Manifest/Cloak Enabler"
+    },
+    "174475": {
+      "file": "scripts/objects/Cloak_Manifest Enabler_174475.lua",
+      "nickname": "Cloak/Manifest Enabler"
+    },
+    "d83b34": {
+      "file": "scripts/objects/Oath of Druids Enabler_d83b34.lua",
+      "nickname": "Oath of Druids Enabler"
+    },
+    "9c48a1": {
+      "file": "scripts/objects/_i_Card Stamp Tool__i__9c48a1.lua",
+      "nickname": "[i]Card Stamp Tool[/i]"
+    },
+    "d1d8be": {
+      "file": "scripts/objects/Card Size Multiplier_d1d8be.lua",
+      "nickname": "Card Size Multiplier"
+    },
+    "33c58f": {
+      "file": "scripts/objects/turn phase announcer_33c58f.lua",
+      "nickname": "turn phase announcer"
+    },
+    "430f58": {
+      "file": "scripts/objects/Upkeep Reminders_430f58.lua",
+      "nickname": "Upkeep Reminders"
+    },
+    "7deec9": {
+      "file": "scripts/objects/moon-mtg-equip_7deec9.lua",
+      "nickname": "moon-mtg-equip"
+    },
+    "f85b39": {
+      "file": "scripts/objects/Ready__f85b39.lua",
+      "nickname": "Ready?"
+    },
+    "f598ea": {
+      "file": "scripts/objects/Reset Readiness Tokens_f598ea.lua",
+      "nickname": "Reset Readiness Tokens"
+    },
+    "e69660": {
+      "file": "scripts/objects/Rotate Hands _Right__e69660.lua",
+      "nickname": "Rotate Hands (Right)"
+    },
+    "17bafe": {
+      "file": "scripts/objects/Rotate Hands _Left__17bafe.lua",
+      "nickname": "Rotate Hands (Left)"
+    },
+    "b7e70c": {
+      "file": "scripts/objects/hand rotator_b7e70c.lua",
+      "nickname": "hand rotator"
+    },
+    "3d7324": {
+      "file": "scripts/objects/Hand Counter Screen_3d7324.lua",
+      "nickname": "Hand Counter Screen"
+    },
+    "5137aa": {
+      "file": "scripts/objects/Hand Counter Screen_5137aa.lua",
+      "nickname": "Hand Counter Screen"
+    },
+    "fcb7b5": {
+      "file": "scripts/objects/Hand Counter Screen_fcb7b5.lua",
+      "nickname": "Hand Counter Screen"
+    },
+    "4563bf": {
+      "file": "scripts/objects/Hand Counter Screen_4563bf.lua",
+      "nickname": "Hand Counter Screen"
+    },
+    "0ae315": {
+      "file": "scripts/objects/_b_EXPERIMENTAL__b___4p table playmat enabler_0ae315.lua",
+      "nickname": "          [b]EXPERIMENTAL[/b]\r\n4p table playmat enabler"
+    },
+    "ddf5de": {
+      "file": "scripts/objects/_b_rikrassen_s__b__MTG Deck_Draft_Cube Importer_ddf5de.lua",
+      "nickname": "                 [b]rikrassen's[/b]\nMTG Deck/Draft/Cube Importer"
+    },
+    "62e99d": {
+      "file": "scripts/objects/Turn Skipper_62e99d.lua",
+      "nickname": "Turn Skipper"
+    },
+    "ae12d3": {
+      "file": "scripts/objects/πKeywords_ae12d3.lua",
+      "nickname": "πKeywords"
+    },
+    "ee33ec": {
+      "file": "scripts/objects/Who goes first__ee33ec.lua",
+      "nickname": "Who goes first?"
+    },
+    "02e062": {
+      "file": "scripts/objects/Encoder_02e062.lua",
+      "nickname": "Encoder"
+    },
+    "222541": {
+      "file": "scripts/objects/_b_rikrassen_s__b__MTG Deck_Draft_Cube Importer_222541.lua",
+      "nickname": "                 [b]rikrassen's[/b]\nMTG Deck/Draft/Cube Importer"
+    },
+    "82bf98": {
+      "file": "scripts/objects/PiecePack_Crowns_82bf98.lua",
+      "nickname": "PiecePack_Crowns"
+    },
+    "988e5e": {
+      "file": "scripts/objects/_854FD9_Card Importer _49D54F_6.6_988e5e.lua",
+      "nickname": "[854FD9]Card Importer [49D54F]6.6"
+    }
+  }
+}
