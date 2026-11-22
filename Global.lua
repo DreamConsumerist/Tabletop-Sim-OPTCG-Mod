@@ -17,6 +17,12 @@ local MODULE_CHIP_GUID = "b93b40"
 pID = "_OPTCG_DON_POWER"
 local valueID = "opOnePiece"
 
+-- Second Encoder property: imported card stats (cost/power/counter/etc.),
+-- populated by CardImporter.lua. Kept as its own property/value pair so it
+-- can be enabled independently of the DON!!/Power counters.
+statsPID = "_OPTCG_CARD_STATS"
+local statsValueID = "opCardStats"
+
 local autoActivateModule = true
 local isRegistered = false
 local encVersion = 0
@@ -52,6 +58,24 @@ local function DefaultCardData()
     }
 end
 
+local function DefaultCardStats()
+    return {
+        cardSetID = "",
+        cardName = "",
+        cost = 0,
+        power = 0,
+        counter = 0,
+        color = "",
+        cardType = "",
+        attribute = "",
+        life = 0,
+        subTypes = "",
+        rulesText = "",
+        imageURL = "",
+        displayStats = false
+    }
+end
+
 local function GetCardData(card, encoder)
     local allData = encoder.call("APIobjGetPropData", {
         obj = card,
@@ -76,6 +100,30 @@ local function SaveCardData(card, encoder, allData, data)
     encoder.call("APIobjSetPropData", {
         obj = card,
         propID = pID,
+        data = allData
+    })
+    encoder.call("APIrebuildButtons", {obj = card})
+end
+
+local function GetCardStats(card, encoder)
+    local allData = encoder.call("APIobjGetPropData", {
+        obj = card,
+        propID = statsPID
+    }) or {}
+
+    local data = allData[statsValueID]
+    if data == nil then
+        data = DefaultCardStats()
+    end
+
+    return allData, data
+end
+
+local function SaveCardStats(card, encoder, allData, data)
+    allData[statsValueID] = data
+    encoder.call("APIobjSetPropData", {
+        obj = card,
+        propID = statsPID,
         data = allData
     })
     encoder.call("APIrebuildButtons", {obj = card})
@@ -172,6 +220,23 @@ function RegisterModule()
         default = DefaultCardData()
     })
 
+    encoder.call("APIregisterProperty", {
+        propID = statsPID,
+        name = "One Piece TCG Card Stats",
+        values = {statsValueID},
+        funcOwner = Global,
+        tags = "basic,counter",
+        visible = false,
+        visible_in_hand = 0,
+        activateFunc = "StatsModuleActivation"
+    })
+    encoder.call("APIregisterValue", {
+        valueID = statsValueID,
+        validType = "nil",
+        desc = "One Piece TCG imported card stats",
+        default = DefaultCardStats()
+    })
+
     isRegistered = true
     RefreshModuleChipButtons()
     print("[One Piece TCG] Module registered with Encoder v" .. tostring(encVersion) .. ".")
@@ -186,6 +251,13 @@ function ModuleActivation(card, player)
     local encoder = GetEncoder()
     if encoder ~= nil and card ~= nil then
         encoder.call("APItoggleProperty", {obj = card, propID = pID})
+    end
+end
+
+function StatsModuleActivation(card, player)
+    local encoder = GetEncoder()
+    if encoder ~= nil and card ~= nil then
+        encoder.call("APItoggleProperty", {obj = card, propID = statsPID})
     end
 end
 
@@ -435,11 +507,8 @@ end
 -- Card buttons created by Encoder
 -- -----------------------------------------------------------------------------
 
-function createButtons(t)
-    local encoder = GetEncoder()
-    if encoder == nil or t == nil or t.obj == nil then return end
-
-    local allData = encoder.call("APIobjGetPropData", {obj = t.obj, propID = pID}) or {}
+local function CreateDonPowerButtons(obj, encoder, flip, lightGrey, darkGrey)
+    local allData = encoder.call("APIobjGetPropData", {obj = obj, propID = pID}) or {}
     local data = allData[valueID]
     if data == nil then return end
 
@@ -447,11 +516,7 @@ function createButtons(t)
     if data.powerMod == nil then data.powerMod = 0 end
     if data.displayPowerMod == nil then data.displayPowerMod = false end
 
-    local flip = encoder.call("APIgetFlip", {obj = t.obj}) or 0
-    local lightGrey = {177/255, 177/255, 177/255}
-    local darkGrey = {40/255, 40/255, 40/255}
-
-    t.obj.createButton({
+    obj.createButton({
         click_function = "ToggleDisplayPowerMod",
         function_owner = Global,
         label = "PWR",
@@ -472,7 +537,7 @@ function createButtons(t)
     local donLabel = tostring(data.donAttached) .. " DON"
     local powerLabel = (data.powerMod >= 0 and "+" or "") .. tostring(data.powerMod)
 
-    t.obj.createButton({
+    obj.createButton({
         click_function = "DoNothing",
         function_owner = Global,
         height = 146,
@@ -481,7 +546,7 @@ function createButtons(t)
         position = {-0.52 * flip, 0.28 * flip, statHeight},
         rotation = {0, 0, -90 - 90 * flip}
     })
-    t.obj.createButton({
+    obj.createButton({
         label = donLabel,
         tooltip = "Left-click: +1 DON!!\nRight-click: -1 DON!!",
         click_function = "ReceiveDonClick",
@@ -495,7 +560,7 @@ function createButtons(t)
         rotation = {0, 0, 90 - 90 * flip}
     })
 
-    t.obj.createButton({
+    obj.createButton({
         click_function = "DoNothing",
         function_owner = Global,
         height = 146,
@@ -504,7 +569,7 @@ function createButtons(t)
         position = {0.42 * flip, 0.28 * flip, statHeight},
         rotation = {0, 0, -90 - 90 * flip}
     })
-    t.obj.createButton({
+    obj.createButton({
         label = powerLabel,
         tooltip = "Left-click: +1000 Power\nRight-click: -1000 Power",
         click_function = "ReceivePowerClick",
@@ -517,6 +582,118 @@ function createButtons(t)
         font_color = {1, 1, 1},
         rotation = {0, 0, 90 - 90 * flip}
     })
+end
+
+-- NOTE: panel positions below are a first pass, not yet checked against a
+-- real card in TTS. Expect to nudge the row heights (statsRow1/statsRow2/
+-- rulesRow) and widths once this is visible in-game (see the plan's
+-- verification step 4) -- nothing about the data flow depends on them.
+local function CreateCardStatsButtons(obj, encoder, flip, lightGrey, darkGrey)
+    local _, data = GetCardStats(obj, encoder)
+
+    obj.createButton({
+        click_function = "ToggleDisplayCardStats",
+        function_owner = Global,
+        label = "STATS",
+        font_size = 32,
+        font_color = data.displayStats and {1, 0.8, 0.4, 0.9} or {0.8, 0.8, 0.8, 0.8},
+        tooltip = (data.displayStats and "Hide" or "Show") .. " imported card stats",
+        height = 90,
+        width = 90,
+        color = data.displayStats and {0, 0, 0, 0.9} or {0, 0, 0, 0.7},
+        hover_color = {0, 0, 0, 1},
+        rotation = {0, 0, 90 - 90 * flip},
+        position = {1.035 * flip, 0.35 * flip, -0.16}
+    })
+
+    if not data.displayStats then return end
+
+    local bgY = 0.28 * flip
+    local labelY = 0.35 * flip
+    local statsRow1 = 1.75
+    local statsRow2 = 2.15
+    local rulesRow = 2.6
+
+    local function StatPanel(z, x, width, label)
+        obj.createButton({
+            click_function = "DoNothing",
+            function_owner = Global,
+            height = 110,
+            width = width,
+            color = lightGrey,
+            position = {x * flip, bgY, z},
+            rotation = {0, 0, -90 - 90 * flip}
+        })
+        obj.createButton({
+            click_function = "DoNothing",
+            function_owner = Global,
+            label = label,
+            position = {x * flip, labelY, z},
+            height = 90,
+            width = width - 20,
+            color = darkGrey,
+            font_size = 36,
+            font_color = {1, 1, 1},
+            rotation = {0, 0, 90 - 90 * flip}
+        })
+    end
+
+    local counterLabel = (data.counter ~= nil and data.counter ~= 0) and ("+" .. tostring(data.counter)) or "-"
+    StatPanel(statsRow1, -0.8, 230, "Cost " .. tostring(data.cost))
+    StatPanel(statsRow1, -0.3, 230, "Pwr " .. tostring(data.power))
+    StatPanel(statsRow1, 0.3, 230, "Ctr " .. counterLabel)
+    StatPanel(statsRow1, 0.8, 230, data.color ~= "" and data.color or "-")
+
+    StatPanel(statsRow2, data.cardType == "Leader" and -0.6 or -0.3, 300, data.cardType ~= "" and data.cardType or "-")
+    StatPanel(statsRow2, data.cardType == "Leader" and 0.0 or 0.3, 300, data.attribute ~= "" and data.attribute or "-")
+    if data.cardType == "Leader" then
+        StatPanel(statsRow2, 0.6, 300, "Life " .. tostring(data.life))
+    end
+
+    if data.rulesText ~= nil and data.rulesText ~= "" then
+        local text = data.rulesText
+        if #text > 220 then
+            text = text:sub(1, 217) .. "..."
+        end
+        local _, fsize = encoder.call("APIformatButton", {
+            str = text,
+            font_size = 40,
+            max_len = 420,
+            xJust = "left",
+            yJust = "top"
+        })
+        obj.createButton({
+            click_function = "DoNothing",
+            function_owner = Global,
+            label = text,
+            height = 260,
+            width = 700,
+            color = darkGrey,
+            font_size = fsize or 28,
+            font_color = {1, 1, 1},
+            position = {0, labelY, rulesRow},
+            rotation = {0, 0, 90 - 90 * flip}
+        })
+    end
+end
+
+function createButtons(t)
+    local encoder = GetEncoder()
+    if encoder == nil or t == nil or t.obj == nil then return end
+
+    t.obj.clearButtons()
+
+    local flip = encoder.call("APIgetFlip", {obj = t.obj}) or 0
+    local lightGrey = {177/255, 177/255, 177/255}
+    local darkGrey = {40/255, 40/255, 40/255}
+
+    if encoder.call("APIobjIsPropEnabled", {obj = t.obj, propID = pID}) == true then
+        CreateDonPowerButtons(t.obj, encoder, flip, lightGrey, darkGrey)
+    end
+
+    if encoder.call("APIobjIsPropEnabled", {obj = t.obj, propID = statsPID}) == true then
+        CreateCardStatsButtons(t.obj, encoder, flip, lightGrey, darkGrey)
+    end
 end
 
 function ReceiveDonClick(card, playerColor, alt)
@@ -536,11 +713,25 @@ function ToggleDisplayPowerMod(card, playerColor, alt)
     SaveCardData(card, encoder, allData, data)
 end
 
+function ToggleDisplayCardStats(card, playerColor, alt)
+    local encoder = GetEncoder()
+    if encoder == nil or card == nil then return end
+
+    local allData, data = GetCardStats(card, encoder)
+    data.displayStats = not data.displayStats
+    SaveCardStats(card, encoder, allData, data)
+end
+
 -- -----------------------------------------------------------------------------
 -- Automatic activation (no MTG card parsing)
 -- -----------------------------------------------------------------------------
 
 function onObjectDropped(playerColor, object)
+    TryActivateDonPowerModule(object)
+    TryActivateCardStatsFromGMNotes(object)
+end
+
+function TryActivateDonPowerModule(object)
     if not autoActivateModule or object == nil or object.tag ~= "Card" then return end
     if object.getVar("noencode") == true then return end
 
@@ -559,4 +750,40 @@ function onObjectDropped(playerColor, object)
         encoder.call("APIobjSetPropData", {obj = object, propID = pID, data = allData})
         encoder.call("APIrebuildButtons", {obj = object})
     end
+end
+
+-- Unlike the DON!!/Power module, this runs regardless of autoActivateModule:
+-- a card carrying imported stats should always pick them up on first drop.
+-- Cards spawned by CardImporter.lua are still packed inside a Deck object at
+-- spawn time, which can't be called into directly -- GMNotes is the only
+-- place to stash the data until the card becomes a standalone Object, which
+-- happens exactly when it's drawn/dropped onto the table.
+function TryActivateCardStatsFromGMNotes(object)
+    if object == nil or object.tag ~= "Card" then return end
+
+    local notes = object.getGMNotes() or ""
+    local payload = notes:match("^OPTCG_CARD=(.+)$")
+    if payload == nil then return end
+
+    local encoder = GetEncoder()
+    if encoder == nil then return end
+
+    if encoder.call("APIobjIsPropEnabled", {obj = object, propID = statsPID}) == true then return end
+
+    local ok, decoded = pcall(function() return JSON.decode(payload) end)
+    if not ok or type(decoded) ~= "table" then
+        print("[One Piece TCG] Could not decode card stats from GMNotes.")
+        return
+    end
+
+    if encoder.call("APIobjectExists", {obj = object}) == false then
+        encoder.call("APIencodeObject", {obj = object})
+    end
+
+    encoder.call("APIobjEnableProp", {obj = object, propID = statsPID})
+    local allData, data = GetCardStats(object, encoder)
+    for field, value in pairs(decoded) do
+        data[field] = value
+    end
+    SaveCardStats(object, encoder, allData, data)
 end

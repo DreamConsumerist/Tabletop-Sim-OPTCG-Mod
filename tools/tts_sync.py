@@ -22,8 +22,11 @@ Commands:
 
 Special, hand-maintained files are never overwritten by a plain pull/watch
 (use --force to pull them deliberately):
-  Global.lua    <- the save's top-level "LuaScript"
-  EasyModule.lua <- the object with GUID b93b40 ("Easy Modules Unified")
+  Global.lua       <- the save's top-level "LuaScript"
+  CardImporter.lua <- the object with GUID c055f4 ("CardImporter")
+
+The module chip (GUID b93b40) intentionally carries no script of its own --
+Global.lua drives it entirely by GUID lookup (GetModuleChip()).
 """
 import argparse
 import json
@@ -38,7 +41,7 @@ MANIFEST_PATH = os.path.join(REPO_ROOT, "scripts", "manifest.json")
 GLOBAL_FILE = os.path.join(REPO_ROOT, "Global.lua")
 
 SPECIAL_FILES = {
-    "b93b40": os.path.join(REPO_ROOT, "EasyModule.lua"),  # "Easy Modules Unified"
+    "c055f4": os.path.join(REPO_ROOT, "CardImporter.lua"),  # "CardImporter"
 }
 
 DEFAULT_SAVE = os.path.join(

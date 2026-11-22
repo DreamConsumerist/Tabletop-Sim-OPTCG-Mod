@@ -1,6 +1,6 @@
 {
   "save_source": "C:\\Users\\brndn\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_1.json",
-  "last_sync": "2026-11-21T20:33:20.770805+00:00",
+  "last_sync": "2026-11-21T22:45:36.801521+00:00",
   "objects": {
     "5a7db4": {
       "file": "scripts/objects/Bruh Button_5a7db4.lua",
@@ -137,10 +137,6 @@
     "c1ae57": {
       "file": "scripts/objects/_b_Drop-On-Card Counter__b__c1ae57.lua",
       "nickname": "[b]Drop-On-Card Counter[/b]"
-    },
-    "b93b40": {
-      "file": "EasyModule.lua",
-      "nickname": "[FFCC00]TyrantNomad's[-]\r\nEasy Modules Unified"
     },
     "2f714c": {
       "file": "scripts/objects/Hand Counter_2f714c.lua",
@@ -385,6 +381,10 @@
     "988e5e": {
       "file": "scripts/objects/_854FD9_Card Importer _49D54F_6.6_988e5e.lua",
       "nickname": "[854FD9]Card Importer [49D54F]6.6"
+    },
+    "c055f4": {
+      "file": "CardImporter.lua",
+      "nickname": "Notecard"
     }
   }
 }
