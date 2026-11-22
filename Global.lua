@@ -196,6 +196,14 @@ function onLoad(savedData)
         function_owner = Global,
         delay = 2
     })
+
+    Timer.destroy("onePieceMulliganButtons")
+    Timer.create({
+        identifier = "onePieceMulliganButtons",
+        function_name = "CreateMulliganButtons",
+        function_owner = Global,
+        delay = 2
+    })
 end
 
 function onSave()
@@ -829,8 +837,10 @@ local SEAT_ACTION_BUTTONS = {
 }
 
 local SEAT_BUTTON_OWNERS = {}
+local SEAT_BUTTON_ACTIONS = {}
 for _, entry in ipairs(SEAT_ACTION_BUTTONS) do
     SEAT_BUTTON_OWNERS[entry.guid] = entry.seat
+    SEAT_BUTTON_ACTIONS[entry.guid] = entry.click_function
 end
 
 -- The original MTG mod created these buttons with an explicit
@@ -843,6 +853,11 @@ end
 -- script reload) can wipe a button list down to 0 entirely, silently, with
 -- no error. Recreating them explicitly with function_owner = Global on every
 -- Global load (see onLoad) sidesteps both problems at once.
+--
+-- No `label` here (confirmed against the original MTG mod's own buttons,
+-- which are label=nil too): the button is just a dark overlay over the
+-- Tile's own printed icon, identified on hover via `tooltip` instead of
+-- baked-on text.
 function CreateSeatActionButtons()
     local count = 0
     for _, entry in ipairs(SEAT_ACTION_BUTTONS) do
@@ -850,21 +865,76 @@ function CreateSeatActionButtons()
         if obj ~= nil then
             obj.clearButtons()
             obj.createButton({
-                label = entry.label,
                 tooltip = entry.seat .. " " .. entry.label:sub(1, 1) .. entry.label:sub(2):lower(),
                 click_function = entry.click_function,
                 function_owner = Global,
                 position = {0, 0.3, 0},
-                height = 300,
-                width = 600,
-                font_size = 120,
-                color = {0.15, 0.15, 0.15},
-                font_color = {1, 1, 1}
+                -- These tiles are circular, not square -- TTS buttons are
+                -- always rectangular, so a square sized to the full
+                -- diameter (1000) overhung past the circle's edge into
+                -- visually-empty corners (confirmed live: "hitbox too
+                -- big"). Sizing to the circle's INSCRIBED square instead
+                -- (side = diameter / sqrt(2) ~= 0.707) keeps every clickable
+                -- pixel inside the visible circle, at the cost of a thin
+                -- sliver near the circle's own edge not being clickable.
+                height = 700,
+                width = 700,
+                color = {0, 0, 0, 0},
+                hover_color = {1, 1, 1, 0.15}
             })
+            -- Without this, onObjectNumberTyped never fires at all for this
+            -- object (confirmed live: typing a number while hovering did
+            -- nothing, on an unlocked object with no button overlay either
+            -- -- max_typed_number defaults to 0, i.e. "accept zero digits").
+            -- The MTG mod set this explicitly on its own Scry button for
+            -- the same reason; missed porting it over the first time.
+            obj.max_typed_number = 99
             count = count + 1
         end
     end
     print("[One Piece TCG] Wired " .. count .. "/" .. #SEAT_ACTION_BUTTONS .. " seat action button(s).")
+end
+
+-- 4 inherited per-seat Mulligan tiles (same GUIDs/seat split as the MTG mod
+-- this table was converted from -- seat mapping confirmed live from each
+-- tile's table position, since unlike the Untap/Draw/Mill/Scry tiles these
+-- don't encode their seat in a shared naming/position row). Same
+-- self-healing reasoning as CreateSeatActionButtons above: blank scripts,
+-- needs an explicit function_owner = Global.
+local MULLIGAN_HAND_SIZE = 5
+local MULLIGAN_BUTTONS = {
+    {guid = "3b07ae", seat = "White"},
+    {guid = "c53ac6", seat = "Red"},
+    {guid = "47645d", seat = "Yellow"},
+    {guid = "e0a3bc", seat = "Blue"},
+}
+
+local MULLIGAN_BUTTON_OWNERS = {}
+for _, entry in ipairs(MULLIGAN_BUTTONS) do
+    MULLIGAN_BUTTON_OWNERS[entry.guid] = entry.seat
+end
+
+function CreateMulliganButtons()
+    local count = 0
+    for _, entry in ipairs(MULLIGAN_BUTTONS) do
+        local obj = getObjectFromGUID(entry.guid)
+        if obj ~= nil then
+            obj.clearButtons()
+            obj.createButton({
+                tooltip = entry.seat .. " Mulligan\nShuffle your hand back into your deck and draw " ..
+                          MULLIGAN_HAND_SIZE .. " new cards.\nDouble-click to confirm if cards are already in play.",
+                click_function = "playerMulligan",
+                function_owner = Global,
+                position = {0, 0.3, 0},
+                height = 1000,
+                width = 1600, -- this tile is a wide rectangle, not square like the others (confirmed live: ~2.5 x 0.9 world units)
+                color = {0, 0, 0, 0},
+                hover_color = {1, 1, 1, 0.15}
+            })
+            count = count + 1
+        end
+    end
+    print("[One Piece TCG] Wired " .. count .. "/" .. #MULLIGAN_BUTTONS .. " mulligan button(s).")
 end
 
 -- True if obj is currently sitting in any seat's hand -- a zone's bounding
@@ -906,6 +976,46 @@ local function GetSeatYaw(seatColor)
     return (hand.rotation.y + 180) % 360
 end
 
+-- Ported from the original MTG mod's identical helpers (buttonPress/
+-- buttonCooldown there): a physical "press" -- the whole button-bearing tile
+-- dips down and springs back -- plus a "cooldown" that flips every button on
+-- it upside-down for a few seconds. Without these, resolving an action reads
+-- as an instant, silent state swap instead of something happening.
+local function ButtonPress(obj, seconds)
+    if obj == nil then return end
+    local posUp = obj.getPosition()
+    local posDown = obj.getPosition()
+    posDown.y = posDown.y - 0.1
+    obj.setPositionSmooth(posDown, false, true)
+    Wait.time(function() obj.setPositionSmooth(posUp, false, true) end, math.max(seconds, 0.05))
+end
+
+local function ButtonCooldown(obj, seconds)
+    if obj == nil then return end
+    local buttons = obj.getButtons() or {}
+    for _, but in ipairs(buttons) do
+        local rot = but.rotation
+        local index = but.index
+        obj.editButton({index = index, rotation = {rot.x, rot.y, 180}})
+        Wait.time(function() obj.editButton({index = index, rotation = {rot.x, rot.y, 0}}) end, seconds)
+    end
+end
+
+-- Safety net ported from the original MTG mod's checkMoveSuccess: a smooth
+-- move can get interrupted by physics (a resting Deck in the way, etc.)
+-- before it reaches its target -- if the card is still off by more than a
+-- card's width shortly after the animation should have finished, snap it the
+-- rest of the way rather than leaving it stranded mid-table.
+local function CorrectCardPosition(card, targetPos)
+    if card == nil then return end
+    local cx, _, cz = VectorComponents(card.getPosition())
+    local tx, _, tz = VectorComponents(targetPos)
+    local dx, dz = cx - tx, cz - tz
+    if math.sqrt(dx * dx + dz * dz) > 1 then
+        card.setPosition(targetPos)
+    end
+end
+
 -- Unlike the original MTG version (stun counters, exert, hardcoded card-name
 -- checks, etc. -- none of which exist in OPTCG), this just resets every
 -- card/deck across the button's seat's own zones back to that seat's normal
@@ -913,6 +1023,8 @@ end
 function playerUntap(button, playerColor, alt)
     local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
     if seatColor == nil then return end
+
+    ButtonPress(button, 0.3)
 
     local seatYaw = GetSeatYaw(seatColor)
     local count = 0
@@ -922,7 +1034,7 @@ function playerUntap(button, playerColor, alt)
             for _, obj in ipairs(zone.getObjects()) do
                 if (obj.tag == "Card" or obj.tag == "Deck") and not IsInAnyHand(obj) then
                     local x, _, z = VectorComponents(obj.getRotation())
-                    obj.setRotation({x, seatYaw, z})
+                    obj.setRotationSmooth({x, seatYaw, z}, false, true)
                     count = count + 1
                 end
             end
@@ -934,26 +1046,36 @@ end
 
 -- Deals the top card of the seat's deck into that seat's hand. Object.deal
 -- works on both a Deck and a lone Card, so GetSeatDeckPile's result can be
--- used directly either way.
+-- used directly either way, and already animates the card flying to hand on
+-- its own. Pulled out to its own function (not just inlined in playerDraw)
+-- so onObjectNumberTyped below can also drive it for an arbitrary count --
+-- same "type a number over the button" shortcut the MTG mod's Draw/Mill/
+-- Scry buttons supported, not just a fixed per-click amount.
+function DrawCards(seatColor, count)
+    Wait.time(function()
+        local pile = GetSeatDeckPile(seatColor)
+        if pile == nil then
+            broadcastToAll("[One Piece TCG] " .. seatColor .. "'s deck is empty.")
+            return
+        end
+        pile.deal(1, seatColor)
+    end, 0.15, count)
+end
+
 function playerDraw(button, playerColor, alt)
     local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
     if seatColor == nil then return end
 
-    local pile = GetSeatDeckPile(seatColor)
-    if pile == nil then
-        broadcastToAll("[One Piece TCG] " .. seatColor .. "'s deck is empty.")
-        return
-    end
-
-    pile.deal(1, seatColor)
+    ButtonPress(button, 0.3)
+    DrawCards(seatColor, 1)
 end
 
 -- Moves the top card of the seat's deck straight into their Trash zone, face
--- up (same as any card resting in Trash), no reveal/choice involved.
-function playerMill(button, playerColor, alt)
-    local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
-    if seatColor == nil then return end
-
+-- up (same as any card resting in Trash), no reveal/choice involved. Animated
+-- with takeObject's own smooth option (Deck branch) or setPositionSmooth/
+-- setRotationSmooth (lone-Card branch), same as the original MTG mod's
+-- mill1, with CorrectCardPosition as the same landing-safety-net it used.
+local function Mill1(seatColor)
     local pile = GetSeatDeckPile(seatColor)
     if pile == nil then
         broadcastToAll("[One Piece TCG] " .. seatColor .. "'s deck is empty.")
@@ -968,26 +1090,51 @@ function playerMill(button, playerColor, alt)
     local dropRotation = {0, GetSeatYaw(seatColor), 0}
 
     if pile.tag == "Deck" then
-        pile.takeObject({position = dropPosition, rotation = dropRotation, smooth = false})
+        pile.takeObject({
+            position = dropPosition, rotation = dropRotation, smooth = true,
+            callback_function = function(card)
+                Wait.time(function() CorrectCardPosition(card, dropPosition) end, 0.5)
+            end
+        })
     else
-        pile.setPosition(dropPosition)
-        pile.setRotation(dropRotation)
+        pile.setPositionSmooth(dropPosition, false, true)
+        pile.setRotationSmooth(dropRotation, false, true)
+        Wait.time(function() CorrectCardPosition(pile, dropPosition) end, 0.5)
     end
 
     broadcastToAll("[One Piece TCG] " .. seatColor .. " milled a card.")
+end
+
+-- Same reasoning as DrawCards above -- split out so a typed number can
+-- repeat it, staggered the same way the MTG mod staggered its own
+-- mill/scry/draw repeats (drawDelay between each, not all at once).
+function MillCards(seatColor, count)
+    Wait.time(function() Mill1(seatColor) end, 0.15, count)
+end
+
+function playerMill(button, playerColor, alt)
+    local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
+    if seatColor == nil then return end
+
+    ButtonPress(button, 0.3)
+    MillCards(seatColor, 1)
 end
 
 -- OPTCG's "look at the top X cards of your deck" is a group reveal where
 -- the cards' relative order matters (effects let you rearrange them, not
 -- just resolve one at a time) -- different from MTG's "scry" which this was
 -- first ported from 1:1 (πScry_de4346.lua) before that turned out to be the
--- wrong mechanic entirely. So: pop all X cards out at once, fan them in a
--- row face up, visible only to the owner. Reordering and returning them to
--- the deck needs no special code at all -- they're just ordinary loose cards
--- at that point, so the owner drags them around and back onto the deck
--- (last one placed back ends up on top) using TTS's normal interactions.
--- The only one-way choice that genuinely needs a button is Trash, since
--- that can't be done by just dragging back onto the deck.
+-- wrong mechanic entirely. Each scried card carries Top/Bottom/Trash buttons
+-- (▲/▼/☠, same glyphs/positions as the MTG mod's πScry property).
+--
+-- Now genuinely ported like the MTG mod: cards are dealt into the seat's
+-- own second hand zone (Player[color].getHandTransform(2)/deal(1,color,2)),
+-- which a table-edit added to this save (4 new HandTrigger objects, one per
+-- seat, positioned just past each hand's own pickup trigger -- see the
+-- commit/session notes for exact transforms). A real hand zone gives this
+-- for free: private to the owner, legible orientation, and "drag it out ==
+-- done resolving" via Player[color].getHandObjects(2) membership, no custom
+-- invisible zone or visibility bookkeeping needed at all.
 --
 -- Note on timing: createButton must NOT be called on the object returned
 -- directly by takeObject -- confirmed live, it silently has no effect.
@@ -999,23 +1146,29 @@ local scryCardSeats = {}
 local function ClearScryCard(card)
     scryCardSeats[card.getGUID()] = nil
     card.clearButtons()
-    card.setInvisibleTo({})
 end
 
-local function CreateScryTrashButton(card, seatColor)
+local function CreateScryButtons(card, seatColor)
     scryCardSeats[card.getGUID()] = seatColor
-    card.createButton({
-        click_function = "DoNothing", function_owner = Global,
-        width = 500, height = 400, font_size = 250,
-        scale = {0.55, 0.55, 0.55}, rotation = {0, 0, 180}, position = {-0.8, 0.1, 1.77},
-        color = {0.7, 0.7, 0.7}, font_color = {1, 1, 1}
-    })
-    card.createButton({
-        label = "X", tooltip = "Move to Trash", click_function = "ScryToTrash", function_owner = Global,
-        width = 500, height = 400, font_size = 250,
-        scale = {0.5, 0.5, 0.5}, rotation = {0, 0, 0}, position = {-0.8, 0.1, 1.77},
-        color = {0.16, 0.16, 0.16}, font_color = {1, 1, 1}, hover_color = {0.4, 0.4, 0.4}
-    })
+
+    local function AddResolveButton(label, tooltip, fn, z)
+        card.createButton({
+            click_function = "DoNothing", function_owner = Global,
+            width = 500, height = 400, font_size = 250,
+            scale = {0.55, 0.55, 0.55}, rotation = {0, 0, 180}, position = {-0.8, 0.1, z},
+            color = {0.7, 0.7, 0.7}, font_color = {1, 1, 1}
+        })
+        card.createButton({
+            label = label, tooltip = tooltip, click_function = fn, function_owner = Global,
+            width = 500, height = 400, font_size = 250,
+            scale = {0.5, 0.5, 0.5}, rotation = {0, 0, 0}, position = {-0.8, 0.1, z},
+            color = {0.16, 0.16, 0.16}, font_color = {1, 1, 1}, hover_color = {0.4, 0.4, 0.4}
+        })
+    end
+
+    AddResolveButton("▲", "Move to top of deck", "ScryToTop", -2.2)
+    AddResolveButton("▼", "Move to bottom of deck", "ScryToBottom", -1.77)
+    AddResolveButton("X", "Move to Trash", "ScryToTrash", 1.77)
 end
 
 function ScryToTrash(card, playerColor, alt)
@@ -1027,55 +1180,174 @@ function ScryToTrash(card, playerColor, alt)
     if zone == nil then return end
     local zx, zy, zz = VectorComponents(zone.getPosition())
 
-    card.setRotation({0, GetSeatYaw(seatColor), 0}) -- face up
-    card.setPosition({zx, zy + 1, zz})
+    -- No delayed position-correction here on purpose -- see MergeScriedCard
+    -- above for why touching the card again after a delay risks a null
+    -- reference if it's already been auto-merged by then. Trash doesn't
+    -- care about stacking order, so there's nothing to correct for anyway.
+    --
+    -- Same hand-ownership issue as MergeScriedCard: the card is still
+    -- resting in hand-2, so its transform is owned by TTS's hand system
+    -- until use_hands is turned off -- without this it just jerks in place
+    -- instead of actually leaving the hand (confirmed live).
+    card.use_hands = false
+    card.setRotationSmooth({0, GetSeatYaw(seatColor), 0}, false, false) -- face up, flip first, then travel
+    Wait.time(function()
+        if card == nil then return end
+        card.setPositionSmooth({zx, zy + 2, zz}, false, false)
+    end, 0.4)
 end
 
-function playerScry(button, playerColor, alt)
-    local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
-    if seatColor == nil then return end
-
-    local hand = Player[seatColor] and Player[seatColor].getHandTransform(1)
-    if hand == nil then return end
-
-    local count = alt and 3 or 1
-    local hideFrom = {}
-    for _, color in ipairs(TABLE_SEAT_COLORS) do
-        if color ~= seatColor then table.insert(hideFrom, color) end
-    end
-
+-- Both Top and Bottom share the same core trick, confirmed live: a card
+-- lingering near a deck for any length of time (a Wait.time-delayed
+-- "correct its position" check, a slow setPositionSmooth animation that
+-- ends close to the deck, etc.) can get silently auto-merged by TTS's own
+-- physics *before* our own script gets to act on it -- any later code that
+-- still touches that Lua reference then throws "Object reference not set
+-- to an instance of an object" (confirmed live, matches the error players
+-- were hitting), and a merge that happens this way isn't reliably ordered
+-- either (that's why Bottom kept landing back on top no matter what height
+-- was used).
+--
+-- pile.putObject(card) sidesteps both problems: it's a single synchronous
+-- call that merges immediately based on the card's position *at that exact
+-- moment* (above the pile = new top card, below = new bottom card,
+-- confirmed live both ways) -- no settling time for TTS's own auto-merge to
+-- race ahead of, and no later callback that might find the card already
+-- gone. The card still gets a brief smooth flight from hand-2 first for
+-- the animation; the merge itself only happens in one atomic snap right
+-- after, same as how a manual drag-and-drop merge isn't animated either.
+local function MergeScriedCard(card, seatColor, verticalOffset)
     local deckZone = GetPlayerZone(seatColor, "deck")
     if deckZone == nil then return end
-    local bx, by, bz = VectorComponents(deckZone.getPosition())
+    local dx, dy, dz = VectorComponents(deckZone.getPosition())
+
+    -- A card resting IN a hand zone is rendered/positioned by TTS's hand
+    -- system, not normal physics -- setPositionSmooth on it was teleporting
+    -- instantly with zero visible travel (confirmed live) because the hand
+    -- system owns its transform until it's released. use_hands=false frees
+    -- it to move like an ordinary table object again, same as the MTG mod's
+    -- handTrigger() did for this exact hand-to-deck move.
+    -- Park on the SAME side as the final merge (above the deck for Top,
+    -- below it for Bottom) -- parking above for both (confirmed live) made
+    -- "move to bottom" visually read as moving to the top, since the only
+    -- thing the player sees is "hover above, then vanish."
+    local parkOffset = verticalOffset + (verticalOffset >= 0 and 1 or -1)
+
+    -- Flip in place first, then move -- doing both at once read as the
+    -- card tumbling on its way over instead of two distinct, readable
+    -- beats (flip, then travel).
+    card.use_hands = false
+    card.setRotationSmooth({0, GetSeatYaw(seatColor), 180}, false, false) -- face down, same as every other library card
+
+    Wait.time(function()
+        if card == nil then return end
+        card.setPositionSmooth({dx, dy + parkOffset, dz}, false, false) -- straight toward the deck, on the correct side of it -- fast=false for a slower, more visible flight
+
+        Wait.time(function()
+            if card == nil then return end
+            local pile = GetSeatDeckPile(seatColor)
+            card.setPosition({dx, dy + verticalOffset, dz})
+            if pile ~= nil and pile.getGUID() ~= card.getGUID() then
+                pile.putObject(card)
+            end
+        end, 1.1) -- matches the slower fast=false flight above -- let it actually arrive before snapping into the deck
+    end, 0.4) -- give the flip time to actually finish before the move starts
+end
+
+function ScryToTop(card, playerColor, alt)
+    local seatColor = scryCardSeats[card.getGUID()]
+    if seatColor == nil then return end
+    ClearScryCard(card)
+    MergeScriedCard(card, seatColor, 3)
+end
+
+function ScryToBottom(card, playerColor, alt)
+    local seatColor = scryCardSeats[card.getGUID()]
+    if seatColor == nil then return end
+    ClearScryCard(card)
+    MergeScriedCard(card, seatColor, -2)
+end
+
+-- Called from onObjectDropped (see the "Automatic activation" section) for
+-- every card drop in the game -- same event and same check the original MTG
+-- mod's πScry used (onObjectDrop): if this card is still tracked as a scry
+-- card but is no longer sitting in the seat's hand-2, the player dragged it
+-- out to resolve it by hand instead of clicking a button -- clear it either
+-- way.
+function TryClearScryIfLeftZone(object)
+    if object == nil or object.tag ~= "Card" then return end
+    local seatColor = scryCardSeats[object.getGUID()]
+    if seatColor == nil then return end
+
+    for _, handObj in ipairs(Player[seatColor].getHandObjects(2)) do
+        if handObj == object then return end -- still resting in hand-2
+    end
+    ClearScryCard(object)
+end
+
+-- Pulled out from playerScry so onObjectNumberTyped below can drive an
+-- arbitrary count too, same as DrawCards/MillCards.
+function ScryCards(seatColor, count)
+    if Player[seatColor] == nil or Player[seatColor].getHandTransform(2) == nil then
+        broadcastToAll("[One Piece TCG] " .. seatColor .. " has no second hand zone set up for Scry.")
+        return
+    end
 
     local staged = 0
     local anyEmpty = false
-    for i = 0, count - 1 do
+    for i = 1, count do
         local pile = GetSeatDeckPile(seatColor)
         if pile == nil then
             anyEmpty = true
             break
         end
 
-        -- Offset starts at 1 slot, not 0 -- a 0-offset first card used to
-        -- land directly above the deck with no visible separation, which is
-        -- exactly why it looked like "just flipping the top card in place"
-        -- (confirmed live: that's also what happens to a lone remaining
-        -- Card below, which this branch previously never repositioned at
-        -- all, same symptom from a different cause).
-        local stagePos = AddScaledVector({bx, by + 1.5, bz}, hand.right, 1.0 + 0.7 * i)
+        -- Same two-step the MTG mod's scry1 used: extract the card first
+        -- and wait for it to finish spawning, then deal *that* reference
+        -- into hand-2 -- dealing straight off the Deck object doesn't hand
+        -- back a reference to attach the Top/Bottom/Trash buttons to.
+        --
+        -- Extracting to the SAME position as the remaining deck (confirmed
+        -- live -- that's what this did before) invites an immediate
+        -- TTS auto-re-merge before Wait.condition/deal() ever runs, and
+        -- touching that already-merged reference afterward is exactly what
+        -- threw the "Object reference not set to an instance of an object"
+        -- error players were hitting on every single scry. Popping it out
+        -- a few units above first keeps it clear of the deck's own
+        -- collider until it's safely dealt into hand-2.
+        local px, py, pz = VectorComponents(pile.getPosition())
+        local extractPos = {px, py + 3, pz}
+
+        -- deal() is itself animated/async (the card visibly flies into
+        -- hand-2 over time, same as a normal draw) -- creating the
+        -- Top/Bottom/Trash buttons immediately raced TTS's own
+        -- onObjectDropped firing mid-flight, before the card actually
+        -- registered in Player[seatColor].getHandObjects(2) yet. Since
+        -- TryClearScryIfLeftZone only acts on cards already tracked in
+        -- scryCardSeats, waiting to populate that (via CreateScryButtons)
+        -- until the card is *confirmed* resting in hand-2 makes any
+        -- mid-flight onObjectDropped a harmless no-op instead of a race
+        -- that strips the buttons the instant they're created (confirmed
+        -- live).
+        local function IsInHand2(obj)
+            for _, handObj in ipairs(Player[seatColor].getHandObjects(2)) do
+                if handObj == obj then return true end
+            end
+            return false
+        end
 
         local function FinishCard(topCard)
             if topCard == nil then return end
-            topCard.setPosition(stagePos)
-            local x, y = VectorComponents(topCard.getRotation())
-            topCard.setRotation({x, y, 0}) -- face up
-            topCard.setInvisibleTo(hideFrom)
-            CreateScryTrashButton(topCard, seatColor)
+            Wait.condition(function()
+                topCard.deal(1, seatColor, 2)
+                Wait.condition(function()
+                    CreateScryButtons(topCard, seatColor)
+                end, function() return IsInHand2(topCard) end)
+            end, function() return not topCard.spawning end)
         end
 
         if pile.tag == "Deck" then
-            pile.takeObject({position = stagePos, rotation = pile.getRotation(), smooth = false, callback_function = FinishCard})
+            pile.takeObject({position = extractPos, rotation = pile.getRotation(), smooth = false, callback_function = FinishCard})
         else
             FinishCard(pile)
         end
@@ -1090,6 +1362,76 @@ function playerScry(button, playerColor, alt)
             broadcastToAll("[One Piece TCG] " .. seatColor .. "'s deck ran out early.")
         end
     end
+end
+
+function playerScry(button, playerColor, alt)
+    local seatColor = SEAT_BUTTON_OWNERS[button.getGUID()]
+    if seatColor == nil then return end
+
+    ButtonPress(button, 0.3)
+    ScryCards(seatColor, alt and 3 or 1)
+end
+
+-- Shuffles the seat's hand back into their deck and draws a fresh
+-- MULLIGAN_HAND_SIZE-card hand. No once-per-game limit here by design --
+-- that's left to the players to self-police. Adapted from the MTG mod's
+-- playerMulligan -- ported directly are the double-click safety check
+-- (refuses a mid-game press unless clicked again within 0.5s, in case this
+-- was an accidental press) and the staggered reshuffle-then-deal timing.
+-- Not ported: the shrinking 7/6/5/...-card count (MTG-specific, no OPTCG
+-- equivalent) and the land-ratio "smart mulligan" toggle (there are no
+-- lands in OPTCG).
+local mulliganClickTimes = {}
+
+function playerMulligan(button, playerColor, alt)
+    local seatColor = MULLIGAN_BUTTON_OWNERS[button.getGUID()]
+    if seatColor == nil then return end
+
+    local now = os.clock()
+    local isDoubleClick = mulliganClickTimes[seatColor] ~= nil and (now - mulliganClickTimes[seatColor]) < 0.5
+    mulliganClickTimes[seatColor] = now
+
+    local inPlay = false
+    for _, key in ipairs({"characterArea", "stageArea"}) do
+        local zone = GetPlayerZone(seatColor, key)
+        if zone ~= nil then
+            for _, obj in ipairs(zone.getObjects()) do
+                if obj.tag == "Card" or obj.tag == "Deck" then inPlay = true end
+            end
+        end
+    end
+
+    if inPlay and not isDoubleClick then
+        Player[playerColor].broadcast(
+            "Cards already in play -- accidental mulligan press mid-game?\n" ..
+            "If you still wish to mulligan, click the button again within half a second.")
+        return
+    end
+
+    local deck = GetSeatDeckPile(seatColor)
+    if deck == nil or deck.tag ~= "Deck" then
+        broadcastToAll("[One Piece TCG] " .. seatColor .. "'s deck can't be shuffled right now.")
+        return
+    end
+
+    ButtonPress(button, 0.3)
+    ButtonCooldown(button, 2)
+
+    for _, obj in ipairs(Player[seatColor].getHandObjects(1)) do
+        if obj.tag == "Card" then
+            deck.putObject(obj)
+        end
+    end
+
+    Wait.time(function() deck.shuffle() end, 0.1, 7)
+    Wait.time(function()
+        local freshPile = GetSeatDeckPile(seatColor)
+        if freshPile ~= nil then
+            freshPile.deal(MULLIGAN_HAND_SIZE, seatColor)
+        end
+    end, 0.8)
+
+    broadcastToAll("[One Piece TCG] " .. seatColor .. " is taking a mulligan.")
 end
 
 -- -----------------------------------------------------------------------------
@@ -1318,6 +1660,29 @@ end
 function onObjectDropped(playerColor, object)
     TryActivateDonPowerModule(object)
     TryActivateCardStatsFromGMNotes(object)
+    TryClearScryIfLeftZone(object)
+end
+
+-- "Type a number while hovering a button" shortcut, same as the MTG mod's
+-- Draw/Mill/Scry buttons (the tooltip text already promised this: "or type
+-- the desired amount") -- TTS calls this for ANY object whenever a player
+-- types digits while hovering it, not just these; SEAT_BUTTON_ACTIONS is
+-- how it's narrowed down to just our own seat-action tiles.
+function onObjectNumberTyped(obj, playerColor, number)
+    if number == nil or number <= 0 then return end
+    local seatColor = SEAT_BUTTON_OWNERS[obj.getGUID()]
+    if seatColor == nil then return end
+
+    local action = SEAT_BUTTON_ACTIONS[obj.getGUID()]
+    if action == "playerDraw" then
+        broadcastToAll("[One Piece TCG] " .. seatColor .. " draws " .. number .. ".")
+        DrawCards(seatColor, number)
+    elseif action == "playerMill" then
+        broadcastToAll("[One Piece TCG] " .. seatColor .. " mills " .. number .. ".")
+        MillCards(seatColor, number)
+    elseif action == "playerScry" then
+        ScryCards(seatColor, number)
+    end
 end
 
 function TryActivateDonPowerModule(object)
