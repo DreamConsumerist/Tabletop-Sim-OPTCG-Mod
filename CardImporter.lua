@@ -52,6 +52,91 @@ local DECK_SPAWN_POSITIONS = {
     Blue   = {3.7502646446228, 0.983075618743896, 15.5067720413208}
 }
 
+-- Fixed per-seat DON!! deck spawn coordinates -- same measured-placeholder
+-- pattern as LEADER_SPAWN_POSITIONS/DECK_SPAWN_POSITIONS above. Previously
+-- these spawned via a separate manual "CREATE 4 DON!! DECKS" button on the
+-- Global.lua module chip (CreateOneDonDeck/CreateDonDecks there, using a
+-- hand-relative GetDonAreaPositions formula); that button was removed and
+-- DON!! decks now spawn automatically alongside the deck/leader on import
+-- instead, one seat at a time, at these fixed positions.
+local DON_SPAWN_POSITIONS = {
+    White  = {4.09209489822388, 0.983085036277771, -22.2640419006348},
+    Red    = {-40.5021629333496, 0.983604967594147, -22.1983089447021},
+    Yellow = {-4.03835678100586, 0.983604907989502, 22.3025150299072},
+    Blue   = {40.5390167236328, 0.984123826026917, 22.3270950317383}
+}
+
+local DON_CARD_COUNT = 10
+
+-- A hidden template DON!! card that every import clones instead of building
+-- a fresh CardCustom object from raw face/back URLs each time. Spawning a
+-- brand-new custom card via script (spawnObject + setCustomObject) reliably
+-- pops TTS's own custom-card-creation modal (confirmed live -- that's what
+-- was flashing/blocking during import, not our own modal, and setCustomObject
+-- in the callback does NOT suppress it the way TTS's docs imply). clone()
+-- does not trigger that modal.
+--
+-- This template is created ONCE, manually, by the user (right-click >
+-- Custom > Card in TTS, same as any custom card) -- not spawned by this
+-- script at all, specifically so the modal never has a script-driven path
+-- to appear on again. GUID is fixed; if the template is ever deleted, a new
+-- one needs to be hand-created and this constant updated.
+local DON_TEMPLATE_GUID = "7f2099"
+
+-- Spawns the importing seat's 10-card physical DON!! deck at their fixed
+-- table position, tagged/GMNotes'd the same way Global.lua's old
+-- CreateOneDonDeck did (Global.lua's GetDonOwner still reads this same
+-- "OPTCG_DON_OWNER=<color>" convention). A no-op if the importing player
+-- isn't one of the 4 seats this table knows about, or if the template is
+-- missing (never auto-recreated -- see above).
+function SpawnDonDeck(player)
+    if player == nil or DON_SPAWN_POSITIONS[player.color] == nil then return end
+
+    local template = getObjectFromGUID(DON_TEMPLATE_GUID)
+    if template == nil then
+        broadcastToAll("[Card Importer] DON!! template (" .. DON_TEMPLATE_GUID .. ") is missing -- can't spawn a DON!! deck. Create a new template card and update DON_TEMPLATE_GUID.", {1, 0.3, 0.3})
+        return
+    end
+
+    local position = DON_SPAWN_POSITIONS[player.color]
+    local hand = player.getHandTransform(1)
+    local seatRotY = hand and ((hand.rotation.y + 180) % 360) or 0
+    local rotation = {0, seatRotY, 180} -- face down by default, same flip convention as the main deck (rotZ=180)
+    local ownerColor = player.color
+
+    local spawnedCards = {}
+    for cardIndex = 1, DON_CARD_COUNT do
+        local cardPosition = {
+            position[1] + (cardIndex - 1) * 0.025,
+            position[2] + 1.5 + (cardIndex - 1) * 0.015,
+            position[3]
+        }
+        local card = template.clone({position = cardPosition, rotation = rotation})
+        if card ~= nil then
+            card.setName("DON!!")
+            card.setDescription("Physical DON!! resource card")
+            card.setGMNotes("OPTCG_DON_OWNER=" .. ownerColor)
+            card.removeTag("OPTCG_DON_TEMPLATE")
+            card.addTag("OPTCG_DON")
+            card.setLock(false)
+            card.interactable = true
+            card.setInvisibleTo({})
+            table.insert(spawnedCards, card)
+        end
+    end
+
+    if #spawnedCards == DON_CARD_COUNT then
+        local grouped = group(spawnedCards) or {}
+        local deck = grouped[1]
+        if deck ~= nil then
+            deck.setName(ownerColor .. " DON!! Deck")
+            deck.setDescription("10 physical DON!! cards owned by " .. ownerColor .. ".")
+            deck.addTag("OPTCG_DON_DECK")
+            deck.setPositionSmooth(position, false, true)
+        end
+    end
+end
+
 -- -----------------------------------------------------------------------------
 -- Low-level fetch helpers
 -- -----------------------------------------------------------------------------
@@ -289,6 +374,15 @@ function BuildSpawnDeckData(entries, missing, player)
         end
     end
 
+    -- Y (the 2nd component) is card/deck *thickness* in TTS's own axis
+    -- convention, and it's a dead end: confirmed live across three separate
+    -- methods (spawnObjectData's inline scale here, Object.setScale after
+    -- the fact, and group()+setScale on an assembled deck) that TTS silently
+    -- clamps it back to 1 for CardCustom-derived objects every time, no
+    -- error either. TTS's own "thickness" attribute only exists for Custom
+    -- Tiles, not cards/decks -- there's no scripting path to thicker cards
+    -- here, so this stays 1. Only X/Z (card footprint) are actually
+    -- adjustable.
     local cardScale = {2, 1, 2}
 
     if deckIndex > 1 then
@@ -374,6 +468,7 @@ end
 function FinishImport(entries, player)
     local missing = {}
     local spawnedCount, spawnedLeader = BuildSpawnDeckData(entries, missing, player)
+    SpawnDonDeck(player)
 
     for _, cardID in ipairs(missing) do
         broadcastToAll("[Card Importer] Could not find card data for \"" .. cardID .. "\".", {1, 0.3, 0.3})

@@ -27,18 +27,9 @@ local autoActivateModule = true
 local isRegistered = false
 local encVersion = 0
 
--- Physical DON!! card assets (Steam Cloud URLs supplied by the user).
-local DON_FRONT_URL = "https://steamusercontent-a.akamaihd.net/ugc/14669153559823385968/46792876A27844B60ED43F1E78F3196A55711F88/"
-local DON_BACK_URL = "https://steamusercontent-a.akamaihd.net/ugc/15229813050283377381/69A44302DCD5AA0476D68F9982DEC5B88B7D0BDC/"
-local DON_CARD_COUNT = 10
-local DON_CARD_TAG = "OPTCG_DON"
-local DON_DECK_TAG = "OPTCG_DON_DECK"
 -- This table's actual 4 seats (confirmed live via Player.getAvailableColors()).
 -- "Green" is not a seat here; the correct fourth color is "Yellow".
 local TABLE_SEAT_COLORS = {"White", "Red", "Yellow", "Blue"}
-local donDeckGuids = {}
-local donSetupInProgress = false
-local donPendingDecks = 0
 
 -- Ruleset-agnostic card zone layout (Deck/Trash/Life/Leader/Character/Stage/
 -- DON!! zones). Same layout for every seat regardless of game mode
@@ -164,9 +155,6 @@ function onLoad(savedData)
             if decoded.autoActivateModule ~= nil then
                 autoActivateModule = decoded.autoActivateModule
             end
-            if type(decoded.donDeckGuids) == "table" then
-                donDeckGuids = decoded.donDeckGuids
-            end
             if type(decoded.zoneGuids) == "table" then
                 zoneGuids = decoded.zoneGuids
             end
@@ -209,7 +197,6 @@ end
 function onSave()
     return JSON.encode({
         autoActivateModule = autoActivateModule,
-        donDeckGuids = donDeckGuids,
         zoneGuids = zoneGuids
     })
 end
@@ -382,25 +369,11 @@ function CreateModuleChipButtons()
     })
 
     chip.createButton({
-        label = "CREATE 4 DON!! DECKS",
-        tooltip = "Creates one 10-card DON!! deck for each TTS seat. Existing decks are not duplicated.",
-        click_function = "CreateDonDecks",
-        function_owner = Global,
-        position = {0, -0.15, 0.30},
-        rotation = {180, 180, 0},
-        height = 75,
-        width = 650,
-        font_size = 48,
-        color = {0.12, 0.32, 0.58},
-        font_color = {1, 1, 1}
-    })
-
-    chip.createButton({
         label = "CREATE TABLE ZONES",
         tooltip = "Creates the Deck/Trash/Life/Leader/Character/Stage/DON!! zone layout for each TTS seat. Existing zones are not duplicated.",
         click_function = "CreateTableZones",
         function_owner = Global,
-        position = {0, -0.15, 0.56},
+        position = {0, -0.15, 0.30},
         rotation = {180, 180, 0},
         height = 75,
         width = 650,
@@ -414,7 +387,7 @@ function CreateModuleChipButtons()
         tooltip = "Deletes every OPTCG table zone. Use this to re-run CREATE TABLE ZONES after tweaking the layout.",
         click_function = "ClearTableZones",
         function_owner = Global,
-        position = {0, -0.15, 0.82},
+        position = {0, -0.15, 0.56},
         rotation = {180, 180, 0},
         height = 75,
         width = 650,
@@ -444,124 +417,14 @@ local function AddScaledVector(position, direction, distance)
     return {px + dx * distance, py + dy * distance, pz + dz * distance}
 end
 
-local function GetDonAreaPositions(playerColor)
-    local player = Player[playerColor]
-    if player == nil then return nil end
-
-    local hand = player.getHandTransform(1)
-    if hand == nil or hand.position == nil then return nil end
-
-    -- Hand forward points toward the table. The row is laid out left-to-right
-    -- from that player's perspective, just in front of their hand.
-    local rowCenter = AddScaledVector(hand.position, hand.forward, 2.6)
-    return {
-        deck = AddScaledVector(rowCenter, hand.right, -3.0),
-        field = rowCenter,
-        trash = AddScaledVector(rowCenter, hand.right, 3.0),
-        rotation = hand.rotation or {0, 0, 0}
-    }
-end
-
-local function ExistingDonDeck(playerColor)
-    local guid = donDeckGuids[playerColor]
-    if guid == nil then return nil end
-    local deck = getObjectFromGUID(guid)
-    if deck ~= nil then return deck end
-    donDeckGuids[playerColor] = nil
-    return nil
-end
-
-local function FinishDonDeck(playerColor, cards, position)
-    local grouped = group(cards) or {}
-    local deck = grouped[1]
-    if deck == nil then
-        broadcastToAll("[One Piece TCG] Could not group DON!! cards for " .. playerColor .. ".")
-        donPendingDecks = math.max(0, donPendingDecks - 1)
-        if donPendingDecks == 0 then donSetupInProgress = false end
-        return
-    end
-
-    deck.setName(playerColor .. " DON!! Deck")
-    deck.setDescription("10 physical DON!! cards owned by " .. playerColor .. ".")
-    deck.addTag(DON_DECK_TAG)
-    deck.setPositionSmooth(position, false, true)
-    donDeckGuids[playerColor] = deck.getGUID()
-    print("[One Piece TCG] Created " .. playerColor .. " DON!! deck (" .. deck.getGUID() .. ").")
-    donPendingDecks = math.max(0, donPendingDecks - 1)
-    if donPendingDecks == 0 then
-        donSetupInProgress = false
-        broadcastToAll("[One Piece TCG] Four-seat DON!! deck setup complete.")
-    end
-end
-
-local function CreateOneDonDeck(playerColor)
-    local existing = ExistingDonDeck(playerColor)
-    if existing ~= nil then
-        print("[One Piece TCG] " .. playerColor .. " DON!! deck already exists; skipping.")
-        return true
-    end
-
-    local area = GetDonAreaPositions(playerColor)
-    if area == nil then
-        broadcastToAll("[One Piece TCG] Could not find the hand transform for " .. playerColor .. ".")
-        return false
-    end
-    local position = area.deck
-    local rotation = area.rotation
-
-    donPendingDecks = donPendingDecks + 1
-    local spawnedCards = {}
-    local completed = 0
-    local ownerColor = playerColor
-    for cardIndex = 1, DON_CARD_COUNT do
-        local cardPosition = {
-            position[1] + (cardIndex - 1) * 0.025,
-            position[2] + 1.5 + (cardIndex - 1) * 0.015,
-            position[3]
-        }
-        spawnObject({
-            type = "CardCustom",
-            position = cardPosition,
-            rotation = rotation,
-            sound = false,
-            callback_function = function(card)
-                if card == nil then return end
-                card.setCustomObject({face = DON_FRONT_URL, back = DON_BACK_URL})
-                card.setName("DON!!")
-                card.setDescription("Physical DON!! resource card")
-                card.setGMNotes("OPTCG_DON_OWNER=" .. ownerColor)
-                card.addTag(DON_CARD_TAG)
-                table.insert(spawnedCards, card)
-                completed = completed + 1
-
-                if completed == DON_CARD_COUNT then
-                    FinishDonDeck(ownerColor, spawnedCards, position)
-                end
-            end
-        })
-    end
-    return true
-end
-
-function CreateDonDecks()
-    if donSetupInProgress then
-        broadcastToAll("[One Piece TCG] DON!! deck creation is already running.")
-        return
-    end
-
-    donSetupInProgress = true
-    donPendingDecks = 0
-    for _, playerColor in ipairs(TABLE_SEAT_COLORS) do
-        CreateOneDonDeck(playerColor)
-    end
-    if donPendingDecks == 0 then
-        donSetupInProgress = false
-        broadcastToAll("[One Piece TCG] All four DON!! decks already exist or could not be created.")
-    else
-        broadcastToAll("[One Piece TCG] Creating DON!! decks for all four seats...")
-    end
-end
-
+-- DON!! decks are now spawned by CardImporter.lua as part of each seat's
+-- normal deck/leader import (fixed per-seat positions there, same pattern
+-- as LEADER_SPAWN_POSITIONS/DECK_SPAWN_POSITIONS), not by a separate
+-- manual "CREATE 4 DON!! DECKS" button -- that button and the hand-relative
+-- GetDonAreaPositions/CreateOneDonDeck/CreateDonDecks machinery it drove
+-- are gone. GetDonOwner is kept: CardImporter.lua still tags each spawned
+-- DON card with the same "OPTCG_DON_OWNER=<color>" GMNotes convention, so
+-- this lookup is still meaningful for future rule scripting.
 function GetDonOwner(card)
     if card == nil or card.tag ~= "Card" then return nil end
     local notes = card.getGMNotes() or ""
@@ -572,8 +435,7 @@ end
 -- Table zone layout
 -- -----------------------------------------------------------------------------
 -- One fixed set of scripting-trigger zones per seat, laid out relative to
--- that seat's hand transform the same way GetDonAreaPositions works above.
--- This layout is deliberately ruleset-agnostic: it is identical for
+-- that seat's hand transform. This layout is deliberately ruleset-agnostic: it is identical for
 -- split-table and Four Emperors, carries no rule enforcement of its own, and
 -- exists only as named/tagged regions (plus the GetPlayerZone lookup) for
 -- future rule scripting -- life reveal, DON!! cost tracking, attack
@@ -865,7 +727,7 @@ function CreateSeatActionButtons()
         if obj ~= nil then
             obj.clearButtons()
             obj.createButton({
-                tooltip = entry.seat .. " " .. entry.label:sub(1, 1) .. entry.label:sub(2):lower(),
+                tooltip = entry.label:sub(1, 1) .. entry.label:sub(2):lower(),
                 click_function = entry.click_function,
                 function_owner = Global,
                 position = {0, 0.3, 0},
@@ -921,7 +783,7 @@ function CreateMulliganButtons()
         if obj ~= nil then
             obj.clearButtons()
             obj.createButton({
-                tooltip = entry.seat .. " Mulligan\nShuffle your hand back into your deck and draw " ..
+                tooltip = "Mulligan\nShuffle your hand back into your deck and draw " ..
                           MULLIGAN_HAND_SIZE .. " new cards.\nDouble-click to confirm if cards are already in play.",
                 click_function = "playerMulligan",
                 function_owner = Global,
