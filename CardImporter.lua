@@ -33,6 +33,22 @@ local INPUT_ID = "cardImporterDecklistInput"
 
 local lastDecklistText = ""
 
+-- Fixed per-seat Leader/Deck spawn coordinates, matching the Leader Area and
+-- Deck zone layout -- measured live against placeholder objects positioned
+-- at each seat (the placeholders themselves are not part of the finished
+-- table). A seat missing from one of these tables falls back to the
+-- hand-relative offset in BuildSpawnDeckData below.
+local LEADER_SPAWN_POSITIONS = {
+    White  = {23.3202934265137, 0.983632862567902, -15.4720487594604},
+    Red    = {-21.2356739044189, 0.983604907989502, -15.5559482574463},
+    Yellow = {-23.2967567443848, 0.983605027198792, 15.5890121459961},
+    Blue   = {21.2492065429688, 0.983574151992798, 15.6570253372192}
+}
+
+local DECK_SPAWN_POSITIONS = {
+    Yellow = {-40.8182487487793, 0.983604907989502, 15.6064376831055}
+}
+
 -- -----------------------------------------------------------------------------
 -- Low-level fetch helpers
 -- -----------------------------------------------------------------------------
@@ -222,6 +238,14 @@ function BuildSpawnDeckData(entries, missing, player)
         leaderPosition = {basePosition.x, basePosition.y + 2, basePosition.z + 3.5}
         seatRotY = 0
     end
+
+    if player and LEADER_SPAWN_POSITIONS[player.color] then
+        leaderPosition = LEADER_SPAWN_POSITIONS[player.color]
+    end
+    if player and DECK_SPAWN_POSITIONS[player.color] then
+        deckPosition = DECK_SPAWN_POSITIONS[player.color]
+    end
+
     -- spawnObjectData's `rotation` param fully overrides data.Transform's
     -- rotation (not just the Y component), so the deck's face-down flip has
     -- to live in the spawn rotation, not in deckDat.Transform. Flipping via

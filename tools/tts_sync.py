@@ -23,10 +23,16 @@ Commands:
 Special, hand-maintained files are never overwritten by a plain pull/watch
 (use --force to pull them deliberately):
   Global.lua       <- the save's top-level "LuaScript"
-  CardImporter.lua <- the object with GUID c055f4 ("CardImporter")
+  CardImporter.lua <- the object with GUID 2bfaa2 (Custom_Tile, "OPEN IMPORTER")
 
 The module chip (GUID b93b40) intentionally carries no script of its own --
 Global.lua drives it entirely by GUID lookup (GetModuleChip()).
+
+NOTE: the original CardImporter object (GUID c055f4, a plain Notecard) is
+abandoned in the live save with stale pre-rewrite code still on it -- it was
+superseded by 2bfaa2 when the in-game script editor stopped letting edits
+land on it. It still physically exists on the table; delete it in-game when
+convenient. Nothing in this tool references it anymore.
 """
 import argparse
 import json
@@ -41,7 +47,7 @@ MANIFEST_PATH = os.path.join(REPO_ROOT, "scripts", "manifest.json")
 GLOBAL_FILE = os.path.join(REPO_ROOT, "Global.lua")
 
 SPECIAL_FILES = {
-    "c055f4": os.path.join(REPO_ROOT, "CardImporter.lua"),  # "CardImporter"
+    "2bfaa2": os.path.join(REPO_ROOT, "CardImporter.lua"),  # "Custom_Tile" (OPEN IMPORTER)
 }
 
 DEFAULT_SAVE = os.path.join(
