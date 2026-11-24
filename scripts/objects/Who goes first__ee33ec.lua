@@ -1,7 +1,14 @@
 whoGoesFirstVersion = 3.14
 
 function onLoad()
-    whoGoesFirstNameSides()
+    -- Full whoGoesFirst() (not just a NameSides relabel) so a freshly
+    -- cloned pair-scoped die (see GetScopedColors below -- Global.lua's
+    -- EnsurePairDice clones this object for Split-table) immediately
+    -- recomputes its own image/labels for its own scope, instead of
+    -- showing whatever the original die last displayed. Delayed one
+    -- second: a clone needs a moment to settle before self.reload() (which
+    -- this can trigger) is safe to call on it.
+    Wait.time(function() whoGoesFirst() end, 1)
 end
 
 function onPlayerChangeColor(col)
@@ -20,14 +27,51 @@ function onObjectRandomize(obj)
     end
 end
 
+-- Optional pair scoping: Description = "White,Blue" restricts this die to
+-- rolling between just those two seats, regardless of who else is seated
+-- at the table -- used for Split-table's two per-pair dice (Global.lua's
+-- EnsurePairDice). An empty Description (the original die) rolls among
+-- every seated player, unchanged from the inherited behavior -- that's
+-- what Four Emperors uses.
+local function GetScopedColors()
+    local desc = self.getDescription() or ""
+    if desc == "" then return nil end
+    local allowed = {}
+    for color in desc:gmatch("[^,]+") do
+        allowed[color] = true
+    end
+    return allowed
+end
+
+local pollGeneration = 0
+
+-- Auto-detects the roll's result once the die stops moving -- the standard
+-- TTS pattern: poll self.resting, then read the settled face's label via
+-- getRotationValue() -- and reports it to Global so the turn system can
+-- start counting turns from the winner (see Global.lua's
+-- OnWhoGoesFirstSettled). The generation counter guards against an older
+-- poll (from a previous roll that got interrupted/re-rolled before
+-- settling) reporting a stale result after a newer roll has started.
+local function BeginResultPoll()
+    pollGeneration = pollGeneration + 1
+    local myGeneration = pollGeneration
+    Wait.condition(function()
+        if pollGeneration ~= myGeneration then return end
+        Global.call("OnWhoGoesFirstSettled", {dieGuid = self.getGUID(), result = self.getRotationValue()})
+    end, function()
+        return pollGeneration ~= myGeneration or self.resting
+    end)
+end
+
 function whoGoesFirst()
     pcall(function()
+      local scoped = GetScopedColors()
       local seated = ""
       local dietype = 1
       local colors = {"Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink","Brown","White"}
       local shortc = {"r","o","y","g","t","b","p","i","n","w"}
       for k,color in pairs(colors) do
-          if Player[color].seated then
+          if Player[color].seated and (scoped == nil or scoped[color]) then
               seated = seated .. shortc[k]
           end
       end
@@ -66,6 +110,7 @@ function whoGoesFirstNameSides()
     local url = "0rganics.org/tts/wgf/2.php?v=" .. whoGoesFirstVersion .. "&c="
     local cur = self.getCustomObject()
     local rotvals = {}
+    local hasResult = false
 
     if cur.image != url then
         local colors = {"Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink","Brown","White"}
@@ -75,17 +120,21 @@ function whoGoesFirstNameSides()
         local k = 1
 
         if string.len(c) > 0 then
+            hasResult = true
             while k <= string.len(c) do
                 if string.sub(c,k,k) == "x" then
                     table.insert(playersides,"Roll again to see who")
                 else
                     for i=1,10 do
             			if string.sub(c,k,k) == shortc[i] then
-                            if Player[colors[i]].seated then
-                                table.insert(playersides,Player[colors[i]].steam_name)
-                            else
-                                table.insert(playersides,colors[i])
-                            end
+                            -- Labeled with the seat COLOR itself, not the
+                            -- Steam display name: Global.lua's
+                            -- OnWhoGoesFirstSettled needs an unambiguous,
+                            -- machine-readable result to start the turn
+                            -- system from, and the color is exactly as
+                            -- readable to players as a name since every
+                            -- other table control is already color-keyed.
+                            table.insert(playersides,colors[i])
             				break
             			end
             		end
@@ -129,4 +178,7 @@ function whoGoesFirstNameSides()
         self.setName("Who goes first?")
     end
     self.setRotationValues(rotvals);
+    if hasResult then
+        BeginResultPoll()
+    end
 end

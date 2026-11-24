@@ -28,10 +28,20 @@
 local API_BASE = "https://optcgapi.com/api"
 local CARD_BACK_URL = "https://steamusercontent-a.akamaihd.net/ugc/9637735862396937445/7DC779F1C946E11B010AF8D039FF4DAAF09C8868/"
 local WEB_GET_TIMEOUT = 15
-local PANEL_ID = "cardImporterPanel"
-local INPUT_ID = "cardImporterDecklistInput"
+-- One independent panel PER PLAYER COLOR, not one shared panel -- matches
+-- how the inherited "rikrassen" importer does it (scripts/objects/
+-- _b_rikrassen_s__b__MTG Deck_Draft_Cube Importer_*.lua: ids like
+-- "modal-White", each permanently visibility-locked to that one color).
+-- TTS's UI visibility is a simple show/hide per element, not a per-viewer
+-- content fork, so simultaneous independent use for every seated player
+-- needs a genuinely separate node (and separate decklist-text buffer) per
+-- color -- a single shared panel can only ever be "open for one person at
+-- a time," confirmed live: a second player opening it stole visibility
+-- from (and saw the still-typed text of) whoever had it open first.
+local function PanelID(color) return "cardImporterPanel_" .. color end
+local function InputID(color) return "cardImporterDecklistInput_" .. color end
 
-local lastDecklistText = ""
+local lastDecklistTextByColor = {}
 
 -- Fixed per-seat Leader/Deck spawn coordinates, matching the Leader Area and
 -- Deck zone layout -- measured live against placeholder objects positioned
@@ -443,7 +453,7 @@ local function BuildFetchJobs(entries)
 end
 
 function OnImportClicked(player)
-    local entries, warnings = ParseDecklistText(lastDecklistText)
+    local entries, warnings = ParseDecklistText(lastDecklistTextByColor[player.color] or "")
     for _, warning in ipairs(warnings) do
         broadcastToAll("[Card Importer] " .. warning, {1, 0.6, 0.2})
     end
@@ -453,7 +463,7 @@ function OnImportClicked(player)
         return
     end
 
-    UI.setAttribute(PANEL_ID, "active", "false")
+    UI.setAttribute(PanelID(player.color), "active", "false")
 
     local jobs = BuildFetchJobs(entries)
     if #jobs > 0 then
@@ -496,13 +506,18 @@ end
 -- createButton calling UI.setXmlTable to show its modal).
 -- -----------------------------------------------------------------------------
 
-local function BuildUI()
+local function BuildUI(color)
     return {
         {
             tag = "Panel",
             attributes = {
-                id = PANEL_ID,
+                id = PanelID(color),
                 active = "false",
+                -- Locked to this one color permanently -- unlike the old
+                -- shared-panel design, this panel is never reused by
+                -- another player, so visibility never needs to change
+                -- after this.
+                visibility = color,
                 rectAlignment = "MiddleCenter",
                 width = "1000",
                 height = "750",
@@ -536,7 +551,7 @@ local function BuildUI()
                         {
                             tag = "InputField",
                             attributes = {
-                                id = INPUT_ID,
+                                id = InputID(color),
                                 placeholder = "Paste decklist here (one \"4xOP16-064\" line per entry)",
                                 characterLimit = "20000",
                                 multiLine = "true",
@@ -612,7 +627,7 @@ local function BuildUI()
 end
 
 function ReceiveDecklistInput(player, value, id)
-    lastDecklistText = value
+    lastDecklistTextByColor[player.color] = value
 end
 
 function OnClearCacheClicked()
@@ -637,31 +652,53 @@ end
 -- table) -- confirmed live, it's not a screen-space modal at all. The
 -- reference importer's floating dialog comes specifically from using the
 -- global UI instead.
-local uiBuilt = false
+-- Keyed by color: each player's panel is merged in independently the first
+-- time THEY open it, so one player opening theirs never touches another's
+-- already-open (or already-built) panel.
+local uiBuiltForColor = {}
 
-function OnOpenImporterClicked()
-    if uiBuilt then
-        UI.setAttribute(PANEL_ID, "active", "true")
+-- Object buttons (this one's own "OPEN IMPORTER" tile) pass
+-- (object, player_color, alt), not a Player object -- confirmed against
+-- TTS's own click_function docs; don't confuse this with the Global-UI
+-- onClick convention (player, value, id) the modal's own buttons use
+-- below.
+function OnOpenImporterClicked(obj, playerColor, alt)
+    if uiBuiltForColor[playerColor] then
+        UI.setAttribute(PanelID(playerColor), "active", "true")
         return
     end
 
-    -- First open only: setXmlTable doesn't finish instantiating a
-    -- structure this size (Panel > Text/InputField/HorizontalLayout[3
-    -- Buttons]) synchronously -- touching any element by id immediately
-    -- after it (setValue, or even setAttribute on the Panel itself)
-    -- threw an uncatchable native null-reference. One frame of separation
-    -- is enough; confirmed once built, every later open (the `if uiBuilt`
-    -- branch above) can touch it immediately with no issue.
-    UI.setXmlTable(BuildUI())
-    uiBuilt = true
-    Wait.frames(function()
-        UI.setValue(INPUT_ID, lastDecklistText)
-        UI.setAttribute(PANEL_ID, "active", "true")
-    end, 1)
+    -- First open (for this color) only: setXmlTable doesn't finish
+    -- instantiating a structure this size (Panel > Text/InputField/
+    -- HorizontalLayout[3 Buttons]) synchronously -- touching any element
+    -- by id immediately after it (setValue, or even setAttribute on the
+    -- Panel itself) threw an uncatchable native null-reference; confirmed
+    -- once built, every later open (the `if uiBuiltForColor` branch above)
+    -- can touch it immediately with no issue. Previously waited a fixed 1
+    -- frame, which was long enough for this modal alone but NOT once
+    -- Global's turn overlay (and now potentially several other players'
+    -- own panels) also merge into the same tree (confirmed live: the
+    -- first open after a fresh script reload landed during that larger
+    -- tree's own loading window and silently no-op'd) -- UI.loading is
+    -- the documented, size-independent signal for "the UI has actually
+    -- finished applying," so wait on that instead of guessing a frame
+    -- count.
+    --
+    -- Routed through Global's MergeGlobalUINode rather than calling
+    -- UI.setXmlTable directly: that call replaces the ENTIRE global screen
+    -- UI, and Global.lua's own turn-system overlay (plus every OTHER
+    -- player's own panel) also lives there -- a direct call here would
+    -- wipe all of that out.
+    Global.call("MergeGlobalUINode", {nodeId = PanelID(playerColor), nodeTable = BuildUI(playerColor)[1]})
+    uiBuiltForColor[playerColor] = true
+    Wait.condition(function()
+        UI.setValue(InputID(playerColor), lastDecklistTextByColor[playerColor] or "")
+        UI.setAttribute(PanelID(playerColor), "active", "true")
+    end, function() return not UI.loading end)
 end
 
-function OnCloseImporterClicked()
-    UI.setAttribute(PANEL_ID, "active", "false")
+function OnCloseImporterClicked(player)
+    UI.setAttribute(PanelID(player.color), "active", "false")
 end
 
 function CreateAll()
@@ -686,8 +723,8 @@ function onLoad(savedData)
             if type(decoded.cache) == "table" then
                 CardLookup.cache = decoded.cache
             end
-            if type(decoded.lastDecklistText) == "string" then
-                lastDecklistText = decoded.lastDecklistText
+            if type(decoded.lastDecklistTextByColor) == "table" then
+                lastDecklistTextByColor = decoded.lastDecklistTextByColor
             end
         end
     end
@@ -698,6 +735,6 @@ end
 function onSave()
     return JSON.encode({
         cache = CardLookup.cache,
-        lastDecklistText = lastDecklistText
+        lastDecklistTextByColor = lastDecklistTextByColor
     })
 end

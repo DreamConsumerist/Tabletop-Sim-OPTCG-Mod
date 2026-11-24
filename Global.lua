@@ -31,6 +31,52 @@ local encVersion = 0
 -- "Green" is not a seat here; the correct fourth color is "Yellow".
 local TABLE_SEAT_COLORS = {"White", "Red", "Yellow", "Blue"}
 
+-- Turn system. Physically confirmed (independently, from both ZONE_TRANSFORMS
+-- above and the Highlight Mat/Timer object positions in the save) that this
+-- is NOT 4 seats around a rotation -- White & Red share one table edge
+-- (same Z, opposite X) and Yellow & Blue share the other, so the seat that
+-- actually FACES White is Blue, and the seat that faces Red is Yellow.
+local PAIR_SEATS = {A = {"White", "Blue"}, B = {"Red", "Yellow"}}
+-- Real clockwise perimeter order around the table for Four Emperors -- NOT
+-- the TABLE_SEAT_COLORS list above, which is just a zone-setup enumeration.
+local FOUR_EMPERORS_ORDER = {"White", "Blue", "Yellow", "Red"}
+
+-- GUIDs of the inherited per-seat Highlight Mat / Timer objects (confirmed
+-- live from each object's own Description field in the save). Both already
+-- do exactly what the turn system needs -- tint/show on onPlayerTurn(player)
+-- and clear otherwise -- so the turn system drives them through that same
+-- function instead of reimplementing the behavior.
+local HIGHLIGHT_MAT_GUIDS = {White = "d1ae7b", Red = "5cb175", Yellow = "40b95f", Blue = "a42baa"}
+local TIMER_GUIDS = {White = "809133", Red = "29f427", Yellow = "57b8f3", Blue = "9df6a3"}
+
+local GAME_MODE_FOUR_EMPERORS = "FourEmperors"
+local GAME_MODE_SPLIT_TABLE = "SplitTable"
+local GameMode = GAME_MODE_FOUR_EMPERORS
+-- Only meaningful in Split-table mode -- native Turns is a singleton and
+-- can't represent two independent concurrent 1v1 turn clocks, so each
+-- pair's active seat is tracked here instead.
+local PairState = {A = {activeSeat = nil}, B = {activeSeat = nil}}
+
+-- Physical turn-system objects. Only the mode switch gets a dedicated tile
+-- (kept separate from everything else so it can be repositioned on its
+-- own). Rolling uses freshly-SPAWNED plain stock dice, not any pre-existing
+-- GUID: NOT the originally-inherited "Who goes first" die (scripts/objects/
+-- Who goes first__ee33ec.lua), whose external image service at
+-- 0rganics.org is dead (confirmed live: HTTP 500/empty), which made
+-- self.reload() destroy that object the moment a roll was attempted -- and
+-- NOT this repo's existing Die_6 (c59653) / Die_8 (aa9563) objects either,
+-- confirmed live to be sitting unreachable inside dice-bag containers
+-- (nested ContainedObjects in the save, not top-level), not loose on the
+-- table. Spawning fresh ones avoids depending on table state at all, same
+-- self-healing pattern as CreateOneZone's table zones. Ending a turn is
+-- NOT a sandbox object at all: Four Emperors gets that for free from
+-- native Turns' own built-in UI, and Split-table's End A/End B live in a
+-- screen overlay (see the UI section below).
+local turnModeGuid = nil
+local fourEmperorsDieGuid = nil
+local pairADieGuid = nil
+local pairBDieGuid = nil
+
 -- Ruleset-agnostic card zone layout (Deck/Trash/Life/Leader/Character/Stage/
 -- DON!! zones). Same layout for every seat regardless of game mode
 -- (split-table vs. Four Emperors) -- see the "Table zone layout" section
@@ -158,6 +204,34 @@ function onLoad(savedData)
             if type(decoded.zoneGuids) == "table" then
                 zoneGuids = decoded.zoneGuids
             end
+            if decoded.gameMode == GAME_MODE_FOUR_EMPERORS or decoded.gameMode == GAME_MODE_SPLIT_TABLE then
+                GameMode = decoded.gameMode
+            end
+            if type(decoded.pairState) == "table" then
+                PairState = decoded.pairState
+            end
+            if decoded.turnModeGuid ~= nil then
+                turnModeGuid = decoded.turnModeGuid
+            end
+            if decoded.fourEmperorsDieGuid ~= nil then
+                fourEmperorsDieGuid = decoded.fourEmperorsDieGuid
+            end
+            if decoded.pairADieGuid ~= nil then
+                pairADieGuid = decoded.pairADieGuid
+            end
+            if decoded.pairBDieGuid ~= nil then
+                pairBDieGuid = decoded.pairBDieGuid
+            end
+
+            -- One-time migration: the old single "Turn Control" tile (mode
+            -- + roll + end-turn all on one object) is replaced by the mode
+            -- tile alone, the inherited die(s) for rolling, and a screen
+            -- overlay for ending a Split-table turn -- destroy any leftover
+            -- instance of the old combined object.
+            if decoded.turnControlGuid ~= nil then
+                local legacy = getObjectFromGUID(decoded.turnControlGuid)
+                if legacy ~= nil then legacy.destruct() end
+            end
         end
     end
 
@@ -192,12 +266,42 @@ function onLoad(savedData)
         function_owner = Global,
         delay = 2
     })
+
+    Timer.destroy("onePieceTurnMode")
+    Timer.create({
+        identifier = "onePieceTurnMode",
+        function_name = "EnsureTurnModeObject",
+        function_owner = Global,
+        delay = 2
+    })
+
+    Timer.destroy("onePieceWhoGoesFirstDice")
+    Timer.create({
+        identifier = "onePieceWhoGoesFirstDice",
+        function_name = "EnsureWhoGoesFirstDice",
+        function_owner = Global,
+        delay = 2
+    })
+
+    Timer.destroy("onePieceTurnOverlay")
+    Timer.create({
+        identifier = "onePieceTurnOverlay",
+        function_name = "EnsureTurnOverlay",
+        function_owner = Global,
+        delay = 2
+    })
 end
 
 function onSave()
     return JSON.encode({
         autoActivateModule = autoActivateModule,
-        zoneGuids = zoneGuids
+        zoneGuids = zoneGuids,
+        gameMode = GameMode,
+        pairState = PairState,
+        turnModeGuid = turnModeGuid,
+        fourEmperorsDieGuid = fourEmperorsDieGuid,
+        pairADieGuid = pairADieGuid,
+        pairBDieGuid = pairBDieGuid
     })
 end
 
@@ -1098,6 +1202,20 @@ local function MergeScriedCard(card, seatColor, verticalOffset)
     -- Flip in place first, then move -- doing both at once read as the
     -- card tumbling on its way over instead of two distinct, readable
     -- beats (flip, then travel).
+    --
+    -- Bug fix: use_hands=false immediately drops the card out of hand-2's
+    -- privacy, and the flip that follows is an animated rotation through
+    -- real space -- for the ~0.4s it takes, the card's face swings past
+    -- every other player's camera too, exposing exactly what Scry is
+    -- supposed to keep private (confirmed live). setHiddenFrom gives it
+    -- back the same hand-zone-style privacy explicitly, scoped to
+    -- everyone except the scrying seat, for the whole flip+travel.
+    local others = {}
+    for _, seat in ipairs(TABLE_SEAT_COLORS) do
+        if seat ~= seatColor then table.insert(others, seat) end
+    end
+    card.setHiddenFrom(others)
+
     card.use_hands = false
     card.setRotationSmooth({0, GetSeatYaw(seatColor), 180}, false, false) -- face down, same as every other library card
 
@@ -1602,4 +1720,542 @@ function TryActivateCardStatsFromGMNotes(object)
         data[field] = value
     end
     SaveCardStats(object, encoder, allData, data)
+end
+
+-- -----------------------------------------------------------------------------
+-- Turn system: Four Emperors (one continuous 4-player sequence, driven by
+-- native Turns) vs. Split-table (two independent concurrent 1v1 games --
+-- native Turns can't do that since it's a singleton, so PairState tracks
+-- each pair's active seat instead).
+--
+-- Both modes drive the SAME inherited Highlight Mat / Timer objects, which
+-- already do exactly what's wanted (tint/show on onPlayerTurn(player), clear
+-- otherwise) -- Four Emperors gets that for free from native Turns'
+-- broadcast; Split-table dispatches the identical call manually, scoped to
+-- just the two objects belonging to the pair that changed. Neither Highlight
+-- Mat nor Timer needed any changes.
+--
+-- Rolling for turn order is a physical die, not a button -- NOT the
+-- originally-inherited "Who goes first" die (scripts/objects/Who goes
+-- first__ee33ec.lua: its external image service is dead, confirmed live),
+-- and not this repo's existing Die_6/Die_8 objects either (confirmed live:
+-- unreachable inside dice-bag containers). EnsureWhoGoesFirstDice below
+-- spawns three fresh stock dice instead -- a Die_8 for Four Emperors (left
+-- unscoped, rolls among all 4 seats) and two Die_6s for Split-table's
+-- pairs (each scoped via Description to just its own two seats) -- using
+-- the script in WHO_GOES_FIRST_DIE_SCRIPT. Each die auto-detects its own
+-- settled result and reports it here via OnWhoGoesFirstSettled; nothing
+-- here has to poll the die itself.
+--
+-- Ending a turn is NOT a sandbox object: Four Emperors gets that for free
+-- from native Turns' own built-in UI (confirmed live -- no custom button
+-- needed), and Split-table's End A/End B live in a screen overlay merged
+-- into the Global UI (see MergeGlobalUINode below), not drawn on the table.
+-- -----------------------------------------------------------------------------
+
+local TURN_OVERLAY_PANEL_ID = "optcgTurnOverlay"
+local PAIR_END_BUTTON_IDS = {A = "optcgEndA", B = "optcgEndB"}
+
+local function FireSeatTurnEvent(seatColor, player)
+    local mat = getObjectFromGUID(HIGHLIGHT_MAT_GUIDS[seatColor])
+    if mat ~= nil then mat.call("onPlayerTurn", player) end
+
+    local timer = getObjectFromGUID(TIMER_GUIDS[seatColor])
+    if timer ~= nil then timer.call("onPlayerTurn", player) end
+end
+
+-- Mode-switch tile. Deliberately its own object, separate from the dice and
+-- the end-turn overlay, so it can be repositioned independently. Spawned
+-- once and its GUID remembered in onSave, the same self-healing pattern
+-- CreateOneZone uses for the table zones.
+function EnsureTurnModeObject()
+    if turnModeGuid ~= nil and getObjectFromGUID(turnModeGuid) ~= nil then
+        RefreshTurnModeButton()
+        return
+    end
+
+    spawnObject({
+        type = "BlockSquare",
+        position = {0, 1.1, 0},
+        rotation = {0, 0, 0},
+        scale = {1.6, 0.3, 1.6},
+        sound = false,
+        callback_function = function(obj)
+            if obj == nil then return end
+            obj.setName("Turn Mode")
+            obj.setColorTint({0.15, 0.15, 0.15})
+            -- Deliberately NOT locked: a locked object can't be dragged at
+            -- all in TTS, so every click would hit the button instead of
+            -- letting the player reposition the tile.
+            turnModeGuid = obj.getGUID()
+            RefreshTurnModeButton()
+        end
+    })
+end
+
+function RefreshTurnModeButton()
+    local control = getObjectFromGUID(turnModeGuid)
+    if control == nil then return end
+
+    control.clearButtons()
+    control.createButton({
+        label = "MODE:\n" .. (GameMode == GAME_MODE_FOUR_EMPERORS and "FOUR EMPERORS" or "SPLIT TABLE"),
+        click_function = "ToggleGameMode",
+        function_owner = Global,
+        position = {0, 0.5, 0},
+        width = 1500,
+        height = 900,
+        font_size = 170,
+        color = {0.3, 0.3, 0.3},
+        font_color = {1, 1, 1, 100}
+    })
+end
+
+-- Clears every seat's Highlight Mat/Timer to neutral so nothing is ever left
+-- stuck lit from whichever mode was previously active.
+local function ClearAllSeatTurnIndicators()
+    for _, seat in ipairs(TABLE_SEAT_COLORS) do
+        FireSeatTurnEvent(seat, nil)
+    end
+end
+
+function ToggleGameMode()
+    if GameMode == GAME_MODE_FOUR_EMPERORS then
+        GameMode = GAME_MODE_SPLIT_TABLE
+        Turns.enable = false
+    else
+        GameMode = GAME_MODE_FOUR_EMPERORS
+    end
+
+    PairState = {A = {activeSeat = nil}, B = {activeSeat = nil}}
+    ClearAllSeatTurnIndicators()
+    RefreshTurnModeButton()
+    UI.setAttribute(TURN_OVERLAY_PANEL_ID, "active", tostring(GameMode == GAME_MODE_SPLIT_TABLE))
+    RefreshPairEndButtonVisibility("A")
+    RefreshPairEndButtonVisibility("B")
+    UpdateWhoGoesFirstDiceVisibility()
+    broadcastToAll("[One Piece TCG] Turn mode set to " .. GameMode .. ".")
+end
+
+-- Rotates a seat order to start at startSeat without changing the relative
+-- order of the rest -- e.g. {W,B,Y,R} started at Y becomes {Y,R,W,B}.
+local function RotateOrderToStartAt(order, startSeat)
+    local startIndex = 1
+    for i, seat in ipairs(order) do
+        if seat == startSeat then
+            startIndex = i
+            break
+        end
+    end
+
+    local rotated = {}
+    for i = 0, #order - 1 do
+        rotated[i + 1] = order[((startIndex - 1 + i) % #order) + 1]
+    end
+    return rotated
+end
+
+local function ApplyFourEmperorsWinner(winner)
+    local isValidSeat = false
+    for _, seat in ipairs(FOUR_EMPERORS_ORDER) do
+        if seat == winner then isValidSeat = true break end
+    end
+    if not isValidSeat then return end
+
+    Turns.type = 2
+    Turns.order = RotateOrderToStartAt(FOUR_EMPERORS_ORDER, winner)
+    Turns.skip_empty_hands = true
+    Turns.enable = true
+    Turns.turn_color = winner
+    broadcastToAll("[One Piece TCG] " .. winner .. " rolled first and starts the turn order.")
+end
+
+local function ApplyPairWinner(pairKey, winner)
+    local seats = PAIR_SEATS[pairKey]
+    if seats == nil or (winner ~= seats[1] and winner ~= seats[2]) then return end
+
+    local loser = (winner == seats[1]) and seats[2] or seats[1]
+    PairState[pairKey] = {activeSeat = winner}
+    FireSeatTurnEvent(loser, nil)
+    FireSeatTurnEvent(winner, Player[winner])
+    RefreshPairEndButtonVisibility(pairKey)
+    broadcastToAll("[One Piece TCG] " .. winner .. " rolled first in Pair " .. pairKey .. ".")
+end
+
+-- Single entry point every who-goes-first die reports its auto-detected
+-- settled result to -- see WHO_GOES_FIRST_DIE_SCRIPT's BeginResultPoll.
+-- Keyed by which die rolled, gated by whether that die's role actually
+-- matches the CURRENT mode (a stray roll of the Four Emperors die while in
+-- Split-table, or vice versa, is ignored rather than corrupting the other
+-- mode's state).
+function OnWhoGoesFirstSettled(params)
+    if type(params) ~= "table" then return end
+    local dieGuid = params.dieGuid
+    local result = params.result
+
+    if dieGuid == fourEmperorsDieGuid then
+        if GameMode == GAME_MODE_FOUR_EMPERORS then
+            ApplyFourEmperorsWinner(result)
+        end
+    elseif dieGuid == pairADieGuid then
+        if GameMode == GAME_MODE_SPLIT_TABLE then
+            ApplyPairWinner("A", result)
+        end
+    elseif dieGuid == pairBDieGuid then
+        if GameMode == GAME_MODE_SPLIT_TABLE then
+            ApplyPairWinner("B", result)
+        end
+    end
+end
+
+-- Identical to scripts/objects/Die_6_c59653.lua / Die_8_aa9563.lua (kept in
+-- sync there for reference/manual use if those specific dice ever get
+-- pulled out of their bag) -- inlined here as a string because freshly
+-- spawned objects start with a blank script; setLuaScript is how it's
+-- actually attached. See that file for the full commentary.
+local WHO_GOES_FIRST_DIE_SCRIPT = [[
+function onLoad()
+    Wait.time(function() RelabelFaces() end, 1)
+end
+
+function onPlayerChangeColor(col)
+    pcall(RelabelFaces)
+end
+
+function onPickedUp()
+    pcall(RelabelFaces)
+end
+
+function onObjectRandomize(obj)
+    if obj == self then
+        pcall(RelabelFaces)
+    end
+end
+
+local function GetScopedColors()
+    local desc = self.getDescription() or ""
+    if desc == "" then return nil end
+    local allowed = {}
+    for color in desc:gmatch("[^,]+") do
+        allowed[color] = true
+    end
+    return allowed
+end
+
+-- Always identifies which role this die plays (Four Emperors vs a named
+-- pair), so the table never ends up with 2-3 dice all displaying the same
+-- generic name -- confirmed live this was a real point of confusion: once
+-- rolled, every die's name collapsed to the same "goes first!"/"Who goes
+-- first?" with nothing distinguishing them.
+local function RoleLabel()
+    local desc = self.getDescription() or ""
+    if desc == "" then return "Four Emperors" end
+    return desc:gsub(",", "/")
+end
+
+-- The die's own body tint always reflects what it can ACTUALLY roll right
+-- now, rather than a fixed per-role color -- confirmed live a fixed color
+-- was actively misleading (a Pair A die tinted blue when only White was
+-- seated looked like "blue wins" when every face was really White). One
+-- seated color in scope -> that exact color (a guaranteed win is honestly
+-- shown as that color); more than one -> the average of them, which is
+-- what actually told the 3 dice apart in the common all-seated case.
+local function AverageTint(colors)
+    if #colors == 0 then return {0.5, 0.5, 0.5} end
+    local r, g, b = 0, 0, 0
+    for _, color in ipairs(colors) do
+        local rgb = stringColorToRGB(color)
+        r = r + rgb.r
+        g = g + rgb.g
+        b = b + rgb.b
+    end
+    return {r / #colors, g / #colors, b / #colors}
+end
+
+function RelabelFaces()
+    local existing = self.getRotationValues()
+    local faceCount = #existing
+    if faceCount == 0 then return end
+
+    local scoped = GetScopedColors()
+    local allColors = {"Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink","Brown","White"}
+    local seated = {}
+    for _, color in ipairs(allColors) do
+        if Player[color].seated and (scoped == nil or scoped[color]) then
+            table.insert(seated, color)
+        end
+    end
+    self.setColorTint(AverageTint(seated))
+
+    if #seated == 0 then
+        local rotvals = {}
+        for i, rv in ipairs(existing) do
+            rotvals[i] = {value = "", rotation = rv.rotation}
+        end
+        self.setRotationValues(rotvals)
+        self.setName("Who goes first? (" .. RoleLabel() .. ") - no one seated")
+        return
+    end
+
+    local base = math.floor(faceCount / #seated)
+    local extra = faceCount - base * #seated
+    local rotvals = {}
+    local faceIndex = 1
+    for i, color in ipairs(seated) do
+        local count = base + ((i <= extra) and 1 or 0)
+        for _ = 1, count do
+            if faceIndex > faceCount then break end
+            rotvals[faceIndex] = {value = color, rotation = existing[faceIndex].rotation}
+            faceIndex = faceIndex + 1
+        end
+    end
+    while faceIndex <= faceCount do
+        rotvals[faceIndex] = {value = seated[#seated], rotation = existing[faceIndex].rotation}
+        faceIndex = faceIndex + 1
+    end
+
+    self.setRotationValues(rotvals)
+    self.setName("Who goes first? (" .. RoleLabel() .. ")")
+end
+
+local pollGeneration = 0
+
+local function BeginResultPoll()
+    pollGeneration = pollGeneration + 1
+    local myGeneration = pollGeneration
+    Wait.condition(function()
+        if pollGeneration ~= myGeneration then return end
+        Global.call("OnWhoGoesFirstSettled", {dieGuid = self.getGUID(), result = self.getRotationValue()})
+    end, function()
+        return pollGeneration ~= myGeneration or self.resting
+    end)
+end
+
+function onDrop(playerColor)
+    BeginResultPoll()
+end
+
+function onRandomize(playerColor)
+    BeginResultPoll()
+end
+]]
+
+-- Spawns the three who-goes-first dice if they don't already exist --
+-- self-healing, same pattern as CreateOneZone's table zones. A Die_8 for
+-- Four Emperors (left unscoped: Description "" rolls among all 4 seats)
+-- and two Die_6s for Split-table's pairs (scoped via Description to just
+-- their own two seats).
+-- Distinct tint per role (on top of each die's natural White/Red color) so
+-- the 3 dice are tellable apart at a glance, not just by name/tooltip --
+-- confirmed live this was needed: all 3 looked like generic dice otherwise.
+-- `mode` says which GameMode this die is relevant for -- used by
+-- UpdateWhoGoesFirstDiceVisibility to park whichever dice don't match the
+-- current mode (rolling the Four Emperors die in Split-table, or vice
+-- versa, would be ignored anyway per OnWhoGoesFirstSettled's gating, but
+-- leaving the wrong dice sitting on the table was its own point of
+-- confusion -- confirmed live).
+-- hideFrom: the OTHER pair's seats -- confirmed live the user wants each
+-- pair's die kept out of the other pair's view entirely, not just parked
+-- during the wrong mode. setInvisibleTo still lets those players interact
+-- with it if they really try (same caveat as a hidden zone), it just isn't
+-- rendered to them.
+local WHO_GOES_FIRST_DICE = {
+    {guidVar = "fourEmperorsDieGuid", type = "Die_8", description = "", name = "Who goes first? (Four Emperors)", position = {-2, 1.5, -3}, mode = GAME_MODE_FOUR_EMPERORS, hideFrom = {}},
+    {guidVar = "pairADieGuid", type = "Die_6", description = "White,Blue", name = "Who goes first? (Pair A: White/Blue)", position = {0, 1.5, -3}, mode = GAME_MODE_SPLIT_TABLE, hideFrom = {"Red", "Yellow"}},
+    {guidVar = "pairBDieGuid", type = "Die_6", description = "Red,Yellow", name = "Who goes first? (Pair B: Red/Yellow)", position = {2, 1.5, -3}, mode = GAME_MODE_SPLIT_TABLE, hideFrom = {"White", "Blue"}}
+}
+
+local function GetWhoGoesFirstDieGuid(guidVar)
+    if guidVar == "fourEmperorsDieGuid" then return fourEmperorsDieGuid end
+    if guidVar == "pairADieGuid" then return pairADieGuid end
+    if guidVar == "pairBDieGuid" then return pairBDieGuid end
+    return nil
+end
+
+local function SetWhoGoesFirstDieGuid(guidVar, guid)
+    if guidVar == "fourEmperorsDieGuid" then fourEmperorsDieGuid = guid
+    elseif guidVar == "pairADieGuid" then pairADieGuid = guid
+    elseif guidVar == "pairBDieGuid" then pairBDieGuid = guid
+    end
+end
+
+function EnsureWhoGoesFirstDice()
+    local spawnedAny = false
+    for _, entry in ipairs(WHO_GOES_FIRST_DICE) do
+        local existingGuid = GetWhoGoesFirstDieGuid(entry.guidVar)
+        if existingGuid == nil or getObjectFromGUID(existingGuid) == nil then
+            spawnedAny = true
+            spawnObject({
+                type = entry.type,
+                position = entry.position,
+                rotation = {0, 0, 0},
+                sound = false,
+                callback_function = function(obj)
+                    if obj == nil then return end
+                    obj.setName(entry.name)
+                    obj.setDescription(entry.description)
+                    obj.setInvisibleTo(entry.hideFrom)
+                    obj.setLuaScript(WHO_GOES_FIRST_DIE_SCRIPT)
+                    SetWhoGoesFirstDieGuid(entry.guidVar, obj.getGUID())
+                    UpdateWhoGoesFirstDiceVisibility()
+                end
+            })
+        end
+    end
+
+    UpdateWhoGoesFirstDiceVisibility()
+
+    if spawnedAny then
+        broadcastToAll("[One Piece TCG] Who-goes-first dice ready: Die_8 = Four Emperors (all 4 seats), Die_6s = Split-table's Pair A (White/Blue, hidden from Red/Yellow) and Pair B (Red/Yellow, hidden from White/Blue). Each die's color always reflects who it can actually pick. Pick one up and drop it to roll -- the turn system starts automatically from whoever it lands on.")
+    end
+end
+
+-- Moves a die off to the side and disables interaction when its role
+-- doesn't match the current mode, and restores it to its normal spot
+-- otherwise -- parked, not destroyed, so its script/state (and any
+-- already-applied decals) survive the switch.
+local function SetDieParked(entry, parked)
+    local guid = GetWhoGoesFirstDieGuid(entry.guidVar)
+    if guid == nil then return end
+    local obj = getObjectFromGUID(guid)
+    if obj == nil then return end
+
+    if parked then
+        obj.interactable = false
+        obj.setPosition({entry.position[1], -30, entry.position[3]})
+    else
+        obj.interactable = true
+        obj.setPosition(entry.position)
+    end
+end
+
+function UpdateWhoGoesFirstDiceVisibility()
+    for _, entry in ipairs(WHO_GOES_FIRST_DICE) do
+        SetDieParked(entry, entry.mode ~= GameMode)
+    end
+end
+
+function EndPairTurn(pairKey)
+    local seats = PAIR_SEATS[pairKey]
+    local state = PairState[pairKey]
+    if seats == nil or state == nil or state.activeSeat == nil then return end
+
+    local current = state.activeSeat
+    local nextSeat = (current == seats[1]) and seats[2] or seats[1]
+    state.activeSeat = nextSeat
+
+    FireSeatTurnEvent(current, nil)
+    FireSeatTurnEvent(nextSeat, Player[nextSeat])
+    RefreshPairEndButtonVisibility(pairKey)
+end
+
+-- Thin wrappers -- both TTS button click_function and UI onClick can only
+-- name a single global function, so each needs its own name even though
+-- the logic above is shared. (Both calling conventions pass arguments this
+-- ignores, so the same wrapper works for either.)
+function EndPairTurnA() EndPairTurn("A") end
+function EndPairTurnB() EndPairTurn("B") end
+
+-- -----------------------------------------------------------------------------
+-- Screen UI: Split-table's End A / End B overlay. UI.setXmlTable() replaces
+-- the ENTIRE global screen UI, so it can't be called directly here without
+-- risking clobbering CardImporter.lua's own modal (and vice versa) --
+-- MergeGlobalUINode below upserts just one top-level node (matched by its
+-- own "id") instead, and CardImporter.lua merges its modal through the same
+-- helper rather than calling UI.setXmlTable itself.
+-- -----------------------------------------------------------------------------
+
+function MergeGlobalUINode(params)
+    local nodeId = params.nodeId
+    local nodeTable = params.nodeTable
+    local tree = UI.getXmlTable() or {}
+
+    local replaced = false
+    for i, node in ipairs(tree) do
+        if node.attributes ~= nil and node.attributes.id == nodeId then
+            tree[i] = nodeTable
+            replaced = true
+            break
+        end
+    end
+    if not replaced then
+        table.insert(tree, nodeTable)
+    end
+
+    UI.setXmlTable(tree)
+end
+
+local function BuildTurnOverlayNode()
+    return {
+        tag = "Panel",
+        attributes = {
+            id = TURN_OVERLAY_PANEL_ID,
+            active = tostring(GameMode == GAME_MODE_SPLIT_TABLE),
+            rectAlignment = "LowerCenter",
+            width = "520",
+            height = "120",
+            color = "#1a1a1aee",
+            padding = "10 10 10 10"
+        },
+        children = {
+            {
+                tag = "HorizontalLayout",
+                attributes = {
+                    width = "500",
+                    height = "100",
+                    spacing = "20",
+                    childForceExpandWidth = "true",
+                    childForceExpandHeight = "true"
+                },
+                children = {
+                    {
+                        tag = "Button",
+                        value = "END A's TURN\n(White/Blue)",
+                        attributes = {
+                            id = PAIR_END_BUTTON_IDS.A,
+                            onClick = "EndPairTurnA",
+                            -- Baseline: visible to both of Pair A's seats
+                            -- (nobody else ever sees this -- White never
+                            -- sees End B and vice versa). Narrowed to just
+                            -- whichever seat currently has the active turn
+                            -- by RefreshPairEndButtonVisibility, called
+                            -- whenever that pair's activeSeat changes.
+                            visibility = table.concat(PAIR_SEATS.A, "|"),
+                            color = "#2d4a7a",
+                            textColor = "#FFFFFF",
+                            fontSize = "18"
+                        }
+                    },
+                    {
+                        tag = "Button",
+                        value = "END B's TURN\n(Red/Yellow)",
+                        attributes = {
+                            id = PAIR_END_BUTTON_IDS.B,
+                            onClick = "EndPairTurnB",
+                            visibility = table.concat(PAIR_SEATS.B, "|"),
+                            color = "#7a2d2d",
+                            textColor = "#FFFFFF",
+                            fontSize = "18"
+                        }
+                    }
+                }
+            }
+        }
+    }
+end
+
+function EnsureTurnOverlay()
+    MergeGlobalUINode({nodeId = TURN_OVERLAY_PANEL_ID, nodeTable = BuildTurnOverlayNode()})
+end
+
+-- Narrows a pair's End button down to just the seat whose turn it actually
+-- is right now (so, e.g., Blue doesn't see "End A's turn" while it's
+-- White's turn, even though Blue is in Pair A) -- falls back to the full
+-- pair while no roll has happened yet (PairState[pairKey].activeSeat still
+-- nil), since there's no single seat to narrow to at that point.
+function RefreshPairEndButtonVisibility(pairKey)
+    local seats = PAIR_SEATS[pairKey]
+    local state = PairState[pairKey]
+    local visibility = (state ~= nil and state.activeSeat ~= nil) and state.activeSeat or table.concat(seats, "|")
+    UI.setAttribute(PAIR_END_BUTTON_IDS[pairKey], "visibility", visibility)
 end
